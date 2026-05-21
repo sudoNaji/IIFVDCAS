@@ -6,3 +6,4 @@ uploads/ scan_results/ tmp/ *.sqlite3 *.db
 *.pyc
 **/__pycache__/
 node_modules/
+node_modules/
