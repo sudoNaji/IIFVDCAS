@@ -5,3 +5,4 @@ logs/ *.log .DS_Store Thumbs.db .vscode/ .idea/ *.swp
 uploads/ scan_results/ tmp/ *.sqlite3 *.db
 *.pyc
 **/__pycache__/
+node_modules/
