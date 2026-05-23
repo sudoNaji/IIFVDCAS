@@ -5,7 +5,7 @@ import { useWebSocket } from '../hooks/useWebSocket'
 const nav = [
   { path:'/dashboard',  icon:LayoutDashboard, label:'Dashboard',           phase:null, status:'active' },
   { path:'/devices',    icon:Cpu,             label:'Device Detection',    phase:1,    status:'active' },
-  { path:'/firmware',   icon:HardDrive,       label:'Firmware Extraction', phase:2,    status:'planned' },
+  { path:'/firmware', icon:HardDrive, label:'Firmware Extraction', phase:2, status:'active' },
   { path:'/analysis',   icon:Shield,          label:'Static Analysis',     phase:3,    status:'planned' },
   { path:'/sbom',       icon:Package,         label:'SBOM / HBOM / CBOM',  phase:4,    status:'planned' },
   { path:'/cve',        icon:AlertTriangle,   label:'CVE Mapping',         phase:5,    status:'planned' },

@@ -1,0 +1,11 @@
+2026-05-23 11:03.44 [debug    ] Logging configured             extract_root=. pid=28679 vebosity_level=0
+2026-05-23 11:03.44 [info     ] Creating extraction directory  extract_root=. pid=28679
+2026-05-23 11:03.44 [info     ] Start processing file          file=/tmp/iifvdcas_extractions/f6b3f6998a05/flash.bin pid=28679
+2026-05-23 11:03.44 [info     ] Activated FS access restrictions; rules=[Read("/"), ReadWrite("/dev/shm"), ReadWrite("/tmp/iifvdcas_extractions/f6b3f6998a05/unblob_extracted"), RemoveDir("/tmp/iifvdcas_extractions/f6b3f6998a05/unblob_extracted"), RemoveFile("/tmp/iifvdcas_extractions/f6b3f6998a05/unblob_extracted"), MakeDir("/tmp/iifvdcas_extractions/f6b3f6998a05"), ReadWrite("unblob.log")], status=FullyEnforced pid=28679
+2026-05-23 11:03.44 [debug    ] Detected file-magic            magic='AVR firmware, reset at 0x0035\\012- data' path=/tmp/iifvdcas_extractions/f6b3f6998a05/flash.bin pid=28684
+2026-05-23 11:03.44 [debug    ] Processing file                path=/tmp/iifvdcas_extractions/f6b3f6998a05/flash.bin pid=28684 size=0x8000
+2026-05-23 11:03.44 [debug    ] Calculating chunk for pattern match handler=arc pid=28684 real_offset=0x6ac start_offset=0x6ac
+2026-05-23 11:03.44 [debug    ] Ended searching for chunks     all_chunks=[] pid=28684
+2026-05-23 11:03.44 [debug    ] Calculating entropy for file   path=/tmp/iifvdcas_extractions/f6b3f6998a05/flash.bin pid=28684 size=0x8000
+2026-05-23 11:03.44 [debug    ] Shannon entropy calculated     block_size=0x400 highest=85.47 lowest=0.0 mean=53.51 path=/tmp/iifvdcas_extractions/f6b3f6998a05/flash.bin pid=28684 size=0x8000
+2026-05-23 11:03.44 [debug    ] Chi square probability calculated block_size=0x400 highest=0.0 lowest=0.0 mean=0.0 path=/tmp/iifvdcas_extractions/f6b3f6998a05/flash.bin pid=28684 size=0x8000

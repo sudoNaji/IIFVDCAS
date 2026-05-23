@@ -1,0 +1,200 @@
+"""
+IIFVDCAS — Phase 2 API Routes: Firmware Extraction
+"""
+import asyncio
+import hashlib
+import os
+import shutil
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Optional
+
+from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi.responses import FileResponse
+
+from core.firmware_extraction.extractor import (
+    analyze_firmware_file, run_extraction, cleanup_extraction,
+    FirmwareFileInfo, ExtractionResult, ExtractionStatus, asdict
+)
+
+router = APIRouter(prefix="/api/v1/firmware", tags=["firmware"])
+
+UPLOAD_DIR = Path("/tmp/iifvdcas_uploads")
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+# In-memory job store (replaced by DB in Phase 4)
+extraction_jobs: dict[str, dict] = {}
+
+
+# ─── Upload firmware file ─────────────────────────────────────────────────────
+
+@router.post("/upload")
+async def upload_firmware(file: UploadFile = File(...)):
+    """Upload a firmware binary for analysis."""
+    # Save to upload dir
+    safe_name = Path(file.filename).name.replace(" ", "_")
+    dest = UPLOAD_DIR / safe_name
+    with open(dest, "wb") as f:
+        content = await file.read()
+        f.write(content)
+
+    size = dest.stat().st_size
+    return {
+        "filename": safe_name,
+        "path": str(dest),
+        "size_bytes": size,
+        "size_human": _human_size(size),
+        "uploaded_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# ─── Analyze (P02) without extracting ────────────────────────────────────────
+
+@router.post("/analyze")
+async def analyze_firmware(body: dict):
+    """
+    Run P02 file analysis only — no extraction.
+    Accepts: {"path": "/tmp/iifvdcas_uploads/firmware.bin"}
+             {"device_port": "/dev/ttyACM0"}
+    """
+    fw_path = body.get("path") or body.get("device_path")
+    if not fw_path:
+        raise HTTPException(400, "Provide 'path' or 'device_path'")
+    if not Path(fw_path).exists():
+        raise HTTPException(404, f"File not found: {fw_path}")
+
+    info = analyze_firmware_file(fw_path)
+    return asdict(info)
+
+
+# ─── Start extraction job ─────────────────────────────────────────────────────
+
+@router.post("/extract")
+async def start_extraction(body: dict, background_tasks: BackgroundTasks):
+    """
+    Start a firmware extraction job.
+    Accepts:
+      {"path": "/tmp/iifvdcas_uploads/firmware.bin"}
+      {"device_port": "/dev/ttyACM0"}   ← from Phase 1 device detection
+    Returns job_id immediately; subscribe to /ws for live progress.
+    """
+    fw_path = body.get("path") or body.get("device_path")
+    if not fw_path:
+        raise HTTPException(400, "Provide 'path' or 'device_path'")
+    if not Path(fw_path).exists():
+        raise HTTPException(404, f"File not found: {fw_path}")
+
+    job_id = hashlib.md5(
+        f"{fw_path}-{datetime.now(timezone.utc).isoformat()}".encode()
+    ).hexdigest()[:12]
+
+    extraction_jobs[job_id] = {
+        "job_id": job_id,
+        "status": "pending",
+        "fw_path": fw_path,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    background_tasks.add_task(_run_extraction_bg, fw_path, job_id)
+
+    return {
+        "job_id": job_id,
+        "status": "started",
+        "message": "Extraction started. Connect to /ws for live progress.",
+        "fw_path": fw_path,
+    }
+
+
+async def _run_extraction_bg(fw_path: str, job_id: str):
+    """Background task: runs extraction and broadcasts WS events."""
+    from main import broadcast  # import here to avoid circular
+
+    async def progress_cb(event: dict):
+        await broadcast({**event, "phase": "phase2"})
+
+    def sync_progress_cb(event: dict):
+        asyncio.create_task(progress_cb(event))
+
+    loop = asyncio.get_event_loop()
+
+    await broadcast({"event": "extraction_started", "job_id": job_id, "phase": "phase2"})
+
+    result: ExtractionResult = await loop.run_in_executor(
+        None,
+        lambda: run_extraction(fw_path, job_id, sync_progress_cb),
+    )
+
+    result_dict = asdict(result)
+    extraction_jobs[job_id] = result_dict
+
+    await broadcast({
+        "event": "extraction_complete",
+        "job_id": job_id,
+        "phase": "phase2",
+        "status": result.status.value,
+        "total_files": result.total_files,
+        "linux_found": result.linux_found,
+        "extractor_used": result.extractor_used,
+        "result": result_dict,
+    })
+
+
+# ─── Get extraction result ─────────────────────────────────────────────────────
+
+@router.get("/extract/{job_id}")
+async def get_extraction_result(job_id: str):
+    """Retrieve a completed extraction result."""
+    if job_id not in extraction_jobs:
+        raise HTTPException(404, "Job not found")
+    return extraction_jobs[job_id]
+
+
+@router.get("/extract/{job_id}/tree")
+async def get_file_tree(job_id: str):
+    """Get the extracted file tree for UI display."""
+    if job_id not in extraction_jobs:
+        raise HTTPException(404, "Job not found")
+    job = extraction_jobs[job_id]
+    return {
+        "job_id": job_id,
+        "file_tree": job.get("file_tree", []),
+        "total_files": job.get("total_files", 0),
+        "total_dirs": job.get("total_dirs", 0),
+        "linux_found": job.get("linux_found", False),
+        "linux_paths": job.get("linux_paths", []),
+    }
+
+
+@router.delete("/extract/{job_id}")
+async def delete_extraction(job_id: str):
+    """Clean up extraction output files."""
+    cleanup_extraction(job_id)
+    extraction_jobs.pop(job_id, None)
+    return {"deleted": job_id}
+
+
+@router.get("/jobs")
+async def list_jobs():
+    """List all extraction jobs."""
+    return {
+        "jobs": [
+            {
+                "job_id": j.get("job_id"),
+                "status": j.get("status"),
+                "fw_path": j.get("fw_path"),
+                "total_files": j.get("total_files", 0),
+                "extractor_used": j.get("extractor_used", ""),
+                "started_at": j.get("started_at", ""),
+                "completed_at": j.get("completed_at", ""),
+            }
+            for j in extraction_jobs.values()
+        ]
+    }
+
+
+def _human_size(n: int) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024:
+            return f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} TB"
