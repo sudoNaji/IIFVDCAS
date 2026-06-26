@@ -89,6 +89,10 @@ async def _run_analysis_bg(target_dir: str, job_id: str):
         "total_passwords": result.total_passwords,
         "total_expired_certs": result.total_expired_certs,
         "total_ssh_issues": result.total_ssh_issues,
+        "total_embedded_findings": result.total_embedded_findings,
+        "total_embedded_critical": result.total_embedded_critical,
+        "total_avr_findings": result.total_avr_findings,
+        "total_avr_critical": result.total_avr_critical,
         "result": result_dict,
     })
 
@@ -99,7 +103,8 @@ async def list_jobs():
         "jobs": [
             {k: v for k, v in j.items()
              if k not in ("binary_protections","weak_functions","password_findings",
-                          "cert_findings","script_findings","ssh_findings","log")}
+                          "cert_findings","script_findings","ssh_findings",
+                          "embedded_string_findings","avr_findings","avr_disassembly","log")}
             for j in analysis_jobs.values()
         ]
     }
@@ -130,6 +135,10 @@ async def get_summary(job_id: str):
         "total_expired_certs": j.get("total_expired_certs", 0),
         "total_script_issues": j.get("total_script_issues", 0),
         "total_ssh_issues": j.get("total_ssh_issues", 0),
+        "total_embedded_findings": j.get("total_embedded_findings", 0),
+        "total_embedded_critical": j.get("total_embedded_critical", 0),
+        "total_avr_findings": j.get("total_avr_findings", 0),
+        "total_avr_critical": j.get("total_avr_critical", 0),
     }
 
 
@@ -161,3 +170,20 @@ async def get_certs(job_id: str):
 async def get_ssh(job_id: str):
     if job_id not in analysis_jobs: raise HTTPException(404, "Job not found")
     return {"ssh_findings": analysis_jobs[job_id].get("ssh_findings", [])}
+
+@router.get("/{job_id}/embedded")
+async def get_embedded_findings(job_id: str):
+    if job_id not in analysis_jobs: raise HTTPException(404, "Job not found")
+    return {"embedded_string_findings": analysis_jobs[job_id].get("embedded_string_findings", [])}
+
+@router.get("/{job_id}/avr")
+async def get_avr_analysis(job_id: str):
+    """Get AVR disassembly and security findings for a job."""
+    if job_id not in analysis_jobs: raise HTTPException(404, "Job not found")
+    j = analysis_jobs[job_id]
+    return {
+        "avr_findings": j.get("avr_findings", []),
+        "avr_disassembly": j.get("avr_disassembly", {}),
+        "total_avr_findings": j.get("total_avr_findings", 0),
+        "total_avr_critical": j.get("total_avr_critical", 0),
+    }

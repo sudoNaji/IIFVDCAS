@@ -134,26 +134,88 @@ function BinaryTable({ binaries }) {
   )
 }
 
+import { useAI } from '../hooks/useAI'
+
+// ─── Finding Row (local state for AI explanation) ───────────────────────────
+function FindingRow({ item, fields }) {
+  const { callAI } = useAI()
+  const [explanation, setExplanation] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    setExplanation('')
+    setError('')
+  }, [item])
+
+  const handleExplain = async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const resp = await callAI('explain-finding', {
+        finding: item,
+        firmware_context: {}
+      })
+      setExplanation(resp.explanation)
+    } catch (err) {
+      setError(err.message || 'Failed to explain finding')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="bg-gray-950 rounded-lg p-3 border border-gray-800 space-y-2">
+      <div className="flex items-start justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
+          <SeverityBadge sev={item.severity || 'info'} />
+          {fields.title && <span className="text-xs font-semibold text-white">{item[fields.title]}</span>}
+        </div>
+        <button
+          onClick={handleExplain}
+          disabled={loading}
+          className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold border transition-all ${
+            loading
+              ? 'bg-indigo-950 text-indigo-400 border-indigo-900 cursor-not-allowed'
+              : 'bg-indigo-950/20 text-indigo-400 border-indigo-800/40 hover:bg-indigo-950/50'
+          }`}
+        >
+          <Zap size={10} className={loading ? 'animate-spin' : ''} />
+          {loading ? 'Analyzing...' : '⚡ Explain'}
+        </button>
+      </div>
+
+      <div className="space-y-0.5">
+        {fields.detail?.map(([label, key]) => item[key] ? (
+          <div key={key} className="flex gap-2 text-xs">
+            <span className="text-gray-600 w-24 flex-shrink-0">{label}</span>
+            <span className="text-gray-300 mono break-all">{String(item[key]).substring(0, 120)}</span>
+          </div>
+        ) : null)}
+      </div>
+
+      {explanation && (
+        <div className="p-2 bg-indigo-950/10 border border-indigo-900/30 rounded text-[11px] text-gray-350 leading-relaxed whitespace-pre-wrap">
+          {explanation}
+        </div>
+      )}
+
+      {error && (
+        <div className="p-2 bg-red-950/10 border border-red-900/30 rounded text-[11px] text-red-400">
+          {error}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Findings list ────────────────────────────────────────────────────────────
 function FindingsList({ items, fields }) {
   if (!items?.length) return <p className="text-xs text-gray-500">No findings.</p>
   return (
     <div className="space-y-2">
       {items.slice(0, 50).map((item, i) => (
-        <div key={i} className="bg-gray-950 rounded-lg p-3 border border-gray-800">
-          <div className="flex items-start gap-2 flex-wrap mb-1">
-            <SeverityBadge sev={item.severity || 'info'} />
-            {fields.title && <span className="text-xs font-medium text-white">{item[fields.title]}</span>}
-          </div>
-          <div className="space-y-0.5">
-            {fields.detail?.map(([label, key]) => item[key] ? (
-              <div key={key} className="flex gap-2 text-xs">
-                <span className="text-gray-600 w-24 flex-shrink-0">{label}</span>
-                <span className="text-gray-300 mono break-all">{String(item[key]).substring(0, 120)}</span>
-              </div>
-            ) : null)}
-          </div>
-        </div>
+        <FindingRow key={i} item={item} fields={fields} />
       ))}
       {items.length > 50 && (
         <p className="text-xs text-gray-600">Showing 50 of {items.length} findings</p>
@@ -222,7 +284,15 @@ export default function StaticAnalysis() {
   const [result, setResult] = useState(null)
   const [jobId, setJobId] = useState(null)
   const [error, setError] = useState('')
+  const [extractionJobs, setExtractionJobs] = useState([])
   const { subscribe } = useWebSocket('ws://localhost:8000/ws')
+
+  // Fetch extraction jobs for the dropdown
+  useEffect(() => {
+    api.get('/firmware/jobs')
+      .then(r => setExtractionJobs(r.data.jobs || []))
+      .catch(() => {})
+  }, [])
 
   // Subscribe to WS events
   useEffect(() => {
@@ -305,12 +375,18 @@ export default function StaticAnalysis() {
           <div className="space-y-3">
             <div>
               <label className="text-xs text-gray-500 mb-1 block">Extraction Job ID (from Phase 2)</label>
-              <input
+              <select
                 className="w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-sm mono text-gray-200 focus:border-indigo-600 outline-none"
-                placeholder="e.g. abc123def456"
                 value={extractionJobId}
                 onChange={e => { setExtractionJobId(e.target.value); setTargetDir('') }}
-              />
+              >
+                <option value="">-- Select an extracted job --</option>
+                {extractionJobs.map(job => (
+                  <option key={job.job_id} value={job.job_id}>
+                    {job.job_id} — {job.device_port || job.fw_path?.split('/').pop()}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="flex items-center gap-2 text-xs text-gray-600">
               <div className="flex-1 h-px bg-gray-800" /> or <div className="flex-1 h-px bg-gray-800" />
@@ -380,6 +456,12 @@ export default function StaticAnalysis() {
             <StatCard icon={FileSearch} label="Script Issues" value={result.total_script_issues || 0}
               sub="shellcheck · bandit"
               color={result.total_script_issues > 0 ? 'text-amber-400' : 'text-green-400'} />
+            <StatCard icon={AlertTriangle} label="Embedded Findings" value={result.total_embedded_findings || 0}
+              sub={String(result.total_embedded_critical || 0) + ' critical — creds · backdoors'}
+              color={result.total_embedded_critical > 0 ? 'text-red-400' : result.total_embedded_findings > 0 ? 'text-amber-400' : 'text-green-400'} />
+            <StatCard icon={Cpu} label="AVR/MCU Findings" value={result.total_avr_findings || 0}
+              sub={String(result.total_avr_critical || 0) + ' critical — disasm · symbols'}
+              color={result.total_avr_critical > 0 ? 'text-red-400' : result.total_avr_findings > 0 ? 'text-amber-400' : 'text-green-400'} />
           </div>
 
           {/* S12: Binary Protections */}
@@ -444,6 +526,157 @@ export default function StaticAnalysis() {
               title: 'issue_code',
               detail: [['File', 'file_path'], ['Tool', 'tool'], ['Message', 'message'], ['Line', 'line']]
             }} />
+          </Section>
+
+          {/* AVR: Disassembly + Security Analysis */}
+          {(result.avr_disassembly || result.total_avr_findings > 0) && (
+            <Section title="AVR Analysis — avr-objdump · avr-strings · r2pipe"
+              icon={Cpu} count={result.total_avr_findings}
+              badgeColor={result.total_avr_critical > 0 ? 'badge-red' : 'badge-green'}
+              defaultOpen={result.total_avr_findings > 0}>
+
+              {/* Disassembly metadata */}
+              {result.avr_disassembly && (
+                <div className="mb-4 grid grid-cols-2 lg:grid-cols-4 gap-3">
+                  {[
+                    ['Device', result.avr_disassembly.device_hint],
+                    ['Flash Size', result.avr_disassembly.flash_size_bytes ? Math.round(result.avr_disassembly.flash_size_bytes/1024) + ' KB' : '—'],
+                    ['Entry Point', result.avr_disassembly.entry_point || '—'],
+                    ['Instructions', result.avr_disassembly.total_instructions?.toLocaleString() || '0'],
+                    ['IVT Entries', result.avr_disassembly.interrupt_vectors?.length || 0],
+                    ['Symbols', result.avr_disassembly.functions?.length || 0],
+                    ['Strings Found', result.strings_extracted || '—'],
+                    ['Architecture', result.avr_disassembly.architecture || 'AVR'],
+                  ].map(([label, val]) => (
+                    <div key={label} className="bg-gray-950 border border-gray-800 rounded-lg p-2">
+                      <div className="text-[10px] text-gray-600 mb-0.5">{label}</div>
+                      <div className="text-xs font-medium text-gray-200 mono">{val}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Interrupt Vector Table */}
+              {result.avr_disassembly?.interrupt_vectors?.length > 0 && (
+                <details className="mb-4">
+                  <summary className="text-xs text-gray-500 cursor-pointer mb-2">
+                    Interrupt Vector Table ({result.avr_disassembly.interrupt_vectors.length} entries)
+                  </summary>
+                  <div className="bg-gray-950 rounded-lg border border-gray-800 overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-gray-600 border-b border-gray-800">
+                          <th className="text-left px-3 py-1.5">#</th>
+                          <th className="text-left px-3 py-1.5">Name</th>
+                          <th className="text-left px-3 py-1.5">Address</th>
+                          <th className="text-left px-3 py-1.5">Target</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {result.avr_disassembly.interrupt_vectors.slice(0,10).map((v,i) => (
+                          <tr key={i} className="border-b border-gray-900">
+                            <td className="px-3 py-1 text-gray-600">{v.index}</td>
+                            <td className="px-3 py-1 text-indigo-300 font-medium">{v.name}</td>
+                            <td className="px-3 py-1 mono text-gray-300">{v.address}</td>
+                            <td className="px-3 py-1 mono text-amber-300">{v.target}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </details>
+              )}
+
+              {/* Security Findings */}
+              <div className="space-y-2">
+                {(result.avr_findings || []).map((f, i) => (
+                  <div key={i} className="bg-gray-950 rounded-lg p-3 border border-gray-800">
+                    <div className="flex items-center gap-2 flex-wrap mb-2">
+                      <SeverityBadge sev={f.severity} />
+                      <span className="text-xs font-medium text-white">{f.finding_type?.replace(/_/g,' ')}</span>
+                      <span className="badge badge-gray text-[10px] ml-auto">{f.category}</span>
+                      {f.address && <span className="mono text-[10px] text-gray-600">{f.address}</span>}
+                    </div>
+                    <div className="space-y-0.5">
+                      <div className="flex gap-2 text-xs">
+                        <span className="text-gray-600 w-16 flex-shrink-0">Detail</span>
+                        <span className="text-red-300 mono font-medium">{f.detail}</span>
+                      </div>
+                      {f.context && (
+                        <div className="flex gap-2 text-xs">
+                          <span className="text-gray-600 w-16 flex-shrink-0">Context</span>
+                          <span className="text-gray-500 mono">{f.context.substring(0,120)}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                {!result.avr_findings?.length && <p className="text-xs text-gray-500">No AVR security issues found.</p>}
+              </div>
+
+              {/* Raw disassembly excerpt */}
+              {result.avr_disassembly?.raw_disasm_excerpt && (
+                <details className="mt-3">
+                  <summary className="text-xs text-gray-500 cursor-pointer">
+                    Raw disassembly (first 100 instructions)
+                  </summary>
+                  <pre className="text-[10px] mono text-green-400 bg-gray-950 border border-gray-800 rounded-lg p-3 mt-1 overflow-x-auto max-h-64">
+                    {result.avr_disassembly.raw_disasm_excerpt}
+                  </pre>
+                </details>
+              )}
+            </Section>
+          )}
+
+          {/* S108: Embedded Binary String Analysis */}
+          <Section title="S108 — Embedded Binary String Analysis (IoT/MCU/AVR)"
+            icon={Zap} count={result.total_embedded_findings}
+            badgeColor={result.total_embedded_critical > 0 ? 'badge-red' : result.total_embedded_findings > 0 ? 'badge-amber' : 'badge-green'}
+            defaultOpen={result.total_embedded_findings > 0}>
+            {result.total_embedded_findings > 0 && (
+              <div className="mb-3 grid grid-cols-3 gap-2 text-xs">
+                {[
+                  ['Credentials', result.embedded_string_findings?.filter(e => e.category === 'credential').length || 0, 'text-red-400'],
+                  ['Backdoors',   result.embedded_string_findings?.filter(e => e.category === 'backdoor').length || 0,   'text-orange-400'],
+                  ['Insecure Protocols', result.embedded_string_findings?.filter(e => e.category === 'insecure_protocol').length || 0, 'text-amber-400'],
+                ].map(([label, count, color]) => (
+                  <div key={label} className="bg-gray-950 rounded-lg p-2 border border-gray-800 text-center">
+                    <div className={String(color) + " text-xl font-bold"}>{count}</div>
+                    <div className="text-gray-500">{label}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="space-y-2">
+              {(result.embedded_string_findings || []).map((f, i) => (
+                <div key={i} className="bg-gray-950 rounded-lg p-3 border border-gray-800">
+                  <div className="flex items-center gap-2 mb-2 flex-wrap">
+                    <SeverityBadge sev={f.severity} />
+                    <span className="text-xs font-medium text-white">{f.finding_type?.replace(/_/g, ' ')}</span>
+                    <span className="badge badge-gray text-[10px] ml-auto">{f.category}</span>
+                  </div>
+                  <div className="space-y-1">
+                    <div className="flex gap-2 text-xs">
+                      <span className="text-gray-600 w-20 flex-shrink-0">File</span>
+                      <span className="text-gray-400 mono">{f.file_path}</span>
+                    </div>
+                    <div className="flex gap-2 text-xs">
+                      <span className="text-gray-600 w-20 flex-shrink-0">Match</span>
+                      <span className="text-red-300 mono font-medium">{f.pattern_match}</span>
+                    </div>
+                    {f.context && (
+                      <div className="flex gap-2 text-xs">
+                        <span className="text-gray-600 w-20 flex-shrink-0">Context</span>
+                        <span className="text-gray-500 mono">{f.context.substring(0, 120)}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {!result.embedded_string_findings?.length && (
+                <p className="text-xs text-gray-500">No embedded credentials or backdoors found.</p>
+              )}
+            </div>
           </Section>
 
           {/* Log */}

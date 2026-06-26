@@ -1,9 +1,89 @@
-__pycache__/ *.pyc .venv/ venv/ dist/ build/ .pytest_cache/ .ruff_cache/
-node_modules/ frontend/dist/ frontend/.vite/ *.local
-.env .env.* !.env.example
-logs/ *.log .DS_Store Thumbs.db .vscode/ .idea/ *.swp
-uploads/ scan_results/ tmp/ *.sqlite3 *.db
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
 *.pyc
-**/__pycache__/
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+venv/
+.venv/
+env/
+pip-log.txt
+
+# Node / Frontend
 node_modules/
-node_modules/
+npm-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+dist/
+.dist/
+.cache/
+*.tgz
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Runtime / temp
+/tmp/
+*.log
+*.pid
+*.sock
+
+# Large binary data — NVD index & firmware stores
+/tmp/iifvdcas_nvd.db
+/tmp/iifvdcas_nvd.db-shm
+/tmp/iifvdcas_nvd.db-wal
+/tmp/iifvdcas_firmware_store/
+/tmp/iifvdcas_extractions/
+/tmp/iifvdcas_sbom/
+/tmp/iifvdcas_vex/
+/tmp/iifvdcas_compliance/
+/tmp/iifvdcas_uploads/
+
+# Secrets / credentials
+.env
+.env.*
+*.pem
+*.key
+*.crt
+*.p12
+secrets.json
+config.local.*
+
+# OS
+.DS_Store
+.AppleDouble
+.LSOverride
+desktop.ini
+
+# Arduino / embedded build artefacts
+*.elf
+*.hex
+*.eep
+*.map
+*.lst
+build/
+*.o
+*.d
+
+# Backup files
+*.bak
+*.orig
+routes.py.bak
+backend/__pycache__/
+*.pyc
+unblob.log

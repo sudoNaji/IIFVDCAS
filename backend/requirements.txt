@@ -19,3 +19,7 @@ reportlab==4.1.0
 bandit==1.7.8
 httpx==0.27.0
 pytest==8.2.0
+# AI provider SDKs
+openai>=1.30.0
+anthropic>=0.28.0
+google-generativeai>=0.7.0

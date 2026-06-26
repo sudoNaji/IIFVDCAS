@@ -19,6 +19,8 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# AVR module imported lazily inside run_static_analysis to avoid circular
+
 # ─── Severity levels (matches EMBA colouring) ────────────────────────────────
 CRITICAL = "critical"
 HIGH     = "high"
@@ -147,7 +149,9 @@ class StaticAnalysisResult:
     password_findings: list = field(default_factory=list)     # S45/S107
     cert_findings: list = field(default_factory=list)         # S60
     script_findings: list = field(default_factory=list)       # S20
-    ssh_findings: list = field(default_factory=list)          # S85
+    ssh_findings: list = field(default_factory=list)
+    embedded_string_findings: list = field(default_factory=list)   # S108
+    avr_findings: list = field(default_factory=list)                  # AVR          # S85
 
     # Summary counts
     total_binaries: int = 0
@@ -159,6 +163,11 @@ class StaticAnalysisResult:
     total_expired_certs: int = 0
     total_script_issues: int = 0
     total_ssh_issues: int = 0
+    total_embedded_findings: int = 0
+    total_embedded_critical: int = 0
+    total_avr_findings: int = 0
+    total_avr_critical: int = 0
+    avr_disassembly: dict = field(default_factory=dict)
 
     # Risk score 0-100
     risk_score: int = 0
@@ -670,6 +679,18 @@ def _calculate_risk_score(result: StaticAnalysisResult) -> tuple[int, str]:
     ssh_critical = sum(1 for s in result.ssh_findings if s.get("severity") == CRITICAL)
     score += min(ssh_critical * 5, 10)
 
+    # Embedded strings (S108) — hardcoded creds, backdoors
+    emb_critical = sum(1 for e in result.embedded_string_findings if e.get("severity") == CRITICAL)
+    emb_high     = sum(1 for e in result.embedded_string_findings if e.get("severity") == HIGH)
+    score += min(emb_critical * 8, 25)
+    score += min(emb_high * 3, 10)
+
+    # AVR embedded firmware findings
+    avr_critical = sum(1 for e in result.avr_findings if e.get("severity") == CRITICAL)
+    avr_high     = sum(1 for e in result.avr_findings if e.get("severity") == HIGH)
+    score += min(avr_critical * 8, 25)
+    score += min(avr_high * 3, 10)
+
     score = min(score, 100)
 
     if score >= 70:   label = "critical"
@@ -760,7 +781,45 @@ def run_static_analysis(
         ssh = run_s85_ssh_check(target_dir, log)
         result.ssh_findings = [asdict(s) for s in ssh]
         result.total_ssh_issues = len(ssh)
-        progress(95, f"S85: Done — {len(ssh)} SSH findings")
+        progress(90, f"S85: Done — {len(ssh)} SSH findings")
+
+        # ── S108: Embedded binary string analysis (raw firmware/AVR/MCU) ────
+        progress(92, "S108: Analyzing embedded firmware strings")
+        esf = run_s108_embedded_string_analysis(target_dir, log)
+        result.embedded_string_findings = [asdict(e) for e in esf]
+        result.total_embedded_findings = len(esf)
+        result.total_embedded_critical = sum(1 for e in esf if e.severity == CRITICAL)
+        progress(94, f"S108: Done — {len(esf)} embedded findings "
+                 f"({result.total_embedded_critical} critical)")
+
+        # ── AVR Analysis: Detect and analyze AVR binaries ────────────────────
+        progress(95, "AVR: Detecting and analyzing AVR firmware binaries")
+        try:
+            from core.static_analysis.avr_analyzer import (
+                detect_avr_binaries, run_avr_analysis
+            )
+            avr_bins = detect_avr_binaries(target_dir)
+            if avr_bins:
+                log(f"[AVR] Found {len(avr_bins)} AVR binary(ies)")
+                for avr_bin in avr_bins[:5]:  # Limit to 5 binaries to avoid timeout
+                    log(f"[AVR] Analyzing: {Path(avr_bin).name}")
+                    avr_result = run_avr_analysis(avr_bin, log)
+                    # security_findings already converted to dicts in run_avr_analysis
+                    result.avr_findings.extend(avr_result.security_findings)
+                    # Store sample disassembly
+                    if avr_result.disassembly:
+                        result.avr_disassembly[Path(avr_bin).name] = avr_result.disassembly
+                result.total_avr_findings = len(result.avr_findings)
+                result.total_avr_critical = sum(1 for f in result.avr_findings
+                                                if f.get("severity") == CRITICAL)
+                log(f"[AVR] Analysis complete: {result.total_avr_findings} findings "
+                    f"({result.total_avr_critical} critical)")
+            else:
+                log("[AVR] No AVR binaries detected in extracted firmware")
+        except ImportError as ie:
+            log(f"[AVR] Import error (avr_analyzer): {ie}")
+        except Exception as ae:
+            log(f"[AVR] Analysis error: {ae}")
 
         # ── Risk score ────────────────────────────────────────────────────
         progress(97, "Calculating risk score")
@@ -779,3 +838,181 @@ def run_static_analysis(
         log(f"[ERROR] {e}")
 
     return result
+
+
+# ─── S108: Embedded Binary String Analysis (AVR/MCU/IoT raw firmware) ────────
+# Mirrors EMBA S107/S108 logic for non-Linux firmware (raw .bin files)
+# Detects: hardcoded passwords, WiFi credentials, debug backdoors,
+#          insecure URLs, private keys, debug menus, OTA without signature
+
+EMBEDDED_CREDENTIAL_PATTERNS = [
+    # Passwords / secrets
+    (r'(?i)(password|passwd|pass|pwd|secret|key)\s*[=:]\s*["\']?([^\s"\',;]{4,})',
+     CRITICAL, "hardcoded_password"),
+    # WiFi credentials
+    (r'(?i)(ssid|wifi_ssid|wifi_pass|wifi_password|wpa_psk)\s*[=:\"\']\s*([^\s"\',;]{2,})',
+     CRITICAL, "wifi_credential"),
+    # Bare password-like strings (SuperSecretPass pattern)
+    (r'\b([A-Z][a-z]+[A-Z][a-zA-Z0-9!@#$%]{6,})\b',
+     HIGH, "hardcoded_secret_candidate"),
+    # IP addresses embedded in firmware
+    (r'\b((?:192\.168|10\.|172\.(?:1[6-9]|2[0-9]|3[01]))\.\d{1,3}\.\d{1,3})\b',
+     MEDIUM, "hardcoded_ip_address"),
+    # HTTP (not HTTPS) update URLs
+    (r'http://[^\s"\']{5,}',
+     HIGH, "insecure_http_url"),
+    # Tokens / API keys
+    (r'(?i)(token|api_key|apikey|auth_token|bearer)\s*[=:]\s*["\']?([a-zA-Z0-9_\-]{8,})',
+     CRITICAL, "hardcoded_token"),
+    # Private key headers
+    (r'-----BEGIN (RSA|EC|DSA|OPENSSH|PRIVATE) PRIVATE KEY-----',
+     CRITICAL, "embedded_private_key"),
+    # Default/test credentials
+    (r'(?i)(admin|root|test|guest|default)\s*[:/]\s*(admin|password|1234|test|root)',
+     CRITICAL, "default_credential"),
+]
+
+EMBEDDED_BACKDOOR_PATTERNS = [
+    (r'(?i)debug\s*(menu|mode|console|uart|enabled|active)',
+     HIGH, "debug_interface_enabled"),
+    (r'(?i)(dump|leak|print)\s*(wifi|cred|token|password|secret|config)',
+     CRITICAL, "credential_dump_function"),
+    (r'(?i)secure[\s_-]?boot\s*(disabled?|off|false|0)',
+     CRITICAL, "secure_boot_disabled"),
+    (r'(?i)signature\s*verif\w*\s*(disabled?|off|false|skip)',
+     CRITICAL, "signature_verification_disabled"),
+    (r'(?i)(ota|update|firmware)\s*(warning|skip|no.?verif)',
+     HIGH, "ota_security_bypass"),
+    (r'(?i)backdoor|killswitch|kill.switch|master.?pass',
+     CRITICAL, "backdoor_indicator"),
+    (r'(?i)(uart|serial|console)\s*(debug|enabled|active|open)',
+     MEDIUM, "debug_console_active"),
+]
+
+INSECURE_PROTOCOL_PATTERNS = [
+    (r'(?i)telnet://[^\s]+',         HIGH,   "telnet_url"),
+    (r'(?i)ftp://[^\s]+',            MEDIUM, "ftp_url"),
+    (r'(?i)mqtt://[^\s]+',           MEDIUM, "unencrypted_mqtt"),
+    (r'(?i)(TLS|SSL)\s*(disabled?|off|none|skip)',  HIGH, "tls_disabled"),
+    (r'(?i)verify\s*(peer|host)\s*=\s*(false|0|no)', HIGH, "tls_peer_verify_off"),
+]
+
+
+@dataclass
+class EmbeddedStringFinding:
+    """Finding from raw binary string analysis"""
+    file_path: str
+    finding_type: str
+    pattern_match: str
+    context: str = ""
+    severity: str = HIGH
+    category: str = ""  # credential | backdoor | insecure_protocol | debug
+
+
+def run_s108_embedded_string_analysis(
+    target_dir: str, log_cb
+) -> list[EmbeddedStringFinding]:
+    """
+    Scan raw firmware binaries (AVR, ARM, MIPS, ESP etc.) for embedded
+    credentials, backdoors, debug interfaces, and insecure patterns.
+    Mirrors EMBA S107/S108 deep string scan + firmware-specific checks.
+    Handles: .bin, .hex, .fw, .rom, .img, .elf — anything with strings output.
+    """
+    log_cb("[S108] Starting embedded binary string analysis (IoT/MCU firmware)")
+    results = []
+
+    # Find all candidate firmware files (not just ELF — raw AVR bins too)
+    FW_EXTENSIONS = {
+        ".bin", ".hex", ".fw", ".rom", ".img", ".elf",
+        ".bin.bak", ".firmware", ""  # also scan extensionless files
+    }
+    candidate_files = []
+    for root, dirs, files in os.walk(target_dir):
+        for skip in [".git", "node_modules", "__pycache__"]:
+            if skip in dirs: dirs.remove(skip)
+        for fname in files:
+            fp = Path(root) / fname
+            if not fp.is_file() or fp.is_symlink():
+                continue
+            if fp.stat().st_size < 64:  # skip tiny files
+                continue
+            if fp.stat().st_size > 32 * 1024 * 1024:  # skip >32MB
+                continue
+            if fp.suffix.lower() in FW_EXTENSIONS or fp.suffix == "":
+                candidate_files.append(fp)
+
+    log_cb(f"[S108] Scanning {len(candidate_files)} binary/firmware files for embedded strings")
+
+    for fp in candidate_files:
+        rel = str(fp.relative_to(target_dir))
+        log_cb(f"[S108] Analyzing: {rel} ({fp.stat().st_size // 1024}KB)")
+
+        # Run strings (like EMBA does) — min length 4 chars
+        out, err, rc = _run(["strings", "-n", "4", str(fp)], timeout=30)
+        if not out:
+            continue
+
+        lines = out.splitlines()
+        log_cb(f"[S108] {rel}: {len(lines)} printable strings extracted")
+
+        # ── Credential patterns ────────────────────────────────────────────
+        for pattern, severity, finding_type in EMBEDDED_CREDENTIAL_PATTERNS:
+            for i, line in enumerate(lines):
+                m = re.search(pattern, line)
+                if m:
+                    matched_val = m.group(0)
+                    # Get context (surrounding lines)
+                    ctx_start = max(0, i - 1)
+                    ctx_end   = min(len(lines), i + 2)
+                    context = " | ".join(lines[ctx_start:ctx_end])
+                    results.append(EmbeddedStringFinding(
+                        file_path=rel,
+                        finding_type=finding_type,
+                        pattern_match=matched_val[:100],
+                        context=context[:200],
+                        severity=severity,
+                        category="credential",
+                    ))
+                    break  # one finding per pattern per file
+
+        # ── Backdoor / debug patterns ──────────────────────────────────────
+        for pattern, severity, finding_type in EMBEDDED_BACKDOOR_PATTERNS:
+            for i, line in enumerate(lines):
+                m = re.search(pattern, line)
+                if m:
+                    ctx_start = max(0, i - 1)
+                    ctx_end   = min(len(lines), i + 2)
+                    context = " | ".join(lines[ctx_start:ctx_end])
+                    results.append(EmbeddedStringFinding(
+                        file_path=rel,
+                        finding_type=finding_type,
+                        pattern_match=m.group(0)[:100],
+                        context=context[:200],
+                        severity=severity,
+                        category="backdoor",
+                    ))
+                    break
+
+        # ── Insecure protocol patterns ─────────────────────────────────────
+        for pattern, severity, finding_type in INSECURE_PROTOCOL_PATTERNS:
+            for i, line in enumerate(lines):
+                m = re.search(pattern, line)
+                if m:
+                    ctx_start = max(0, i - 1)
+                    ctx_end   = min(len(lines), i + 2)
+                    context = " | ".join(lines[ctx_start:ctx_end])
+                    results.append(EmbeddedStringFinding(
+                        file_path=rel,
+                        finding_type=finding_type,
+                        pattern_match=m.group(0)[:100],
+                        context=context[:200],
+                        severity=severity,
+                        category="insecure_protocol",
+                    ))
+                    break
+
+    critical_count = sum(1 for r in results if r.severity == CRITICAL)
+    high_count     = sum(1 for r in results if r.severity == HIGH)
+    log_cb(f"[S108] Done — {len(results)} findings "
+           f"({critical_count} critical, {high_count} high)")
+    return results

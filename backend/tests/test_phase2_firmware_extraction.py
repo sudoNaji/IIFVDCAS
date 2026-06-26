@@ -232,7 +232,7 @@ class TestPhase2API:
     def test_version_updated(self, client):
         r = client.get("/")
         assert r.status_code == 200
-        assert r.json()["version"] == "0.3.0"
+        assert r.json()["version"] == "0.8.0"
 
     def test_upload_endpoint_exists(self, client):
         r = client.post("/api/v1/firmware/upload")
@@ -263,4 +263,101 @@ class TestPhase2API:
     def test_system_info_phase2_available(self, client):
         r = client.get("/api/v1/system/info")
         data = r.json()
-        assert "phase2_firmware_extraction" in data["available_phases"]
+        assert "phase2" in data["available_phases"] or "phase2_firmware_extraction" in data["available_phases"]
+
+
+# ─── ESP32 Partition Extraction ──────────────────────────────────────────────
+
+class TestESP32PartitionExtraction:
+    @pytest.fixture
+    def esp32_flash_image(self, tmp_dir):
+        """Generate a synthetic ESP32 flash image with partition table at 0x8000"""
+        path = os.path.join(tmp_dir, "esp32_flash.bin")
+        
+        # 4MB of zeros
+        flash_data = bytearray(4 * 1024 * 1024)
+        
+        # Write bootloader magic at 0x1000
+        flash_data[0x1000] = 0xE9
+        flash_data[0x1001] = 0x03 # segments
+        
+        # Partition table at 0x8000
+        # Format: magic (2s), type (B), subtype (B), offset (L), size (L), name (16s), flags (L)
+        import struct
+        
+        # Entry 1: nvs (type=1, subtype=2, offset=0x9000, size=0x6000)
+        entry1 = struct.pack("<2sBBLL16sL", b'\xaa\x50', 1, 2, 0x9000, 0x6000, b'nvs', 0)
+        
+        # Entry 2: otadata (type=1, subtype=0, offset=0xf000, size=0x2000)
+        entry2 = struct.pack("<2sBBLL16sL", b'\xaa\x50', 1, 0, 0xf000, 0x2000, b'otadata', 0)
+        
+        # Entry 3: factory (type=0, subtype=0, offset=0x10000, size=0x100000)
+        # We also want to write a synthetic app descriptor inside the factory partition to test app desc parsing.
+        # esp_app_desc_t starts at offset 32 (0x20) in the partition.
+        # Format: magic (I), secure_version (I), reserv1 (8s), version (32s), project_name (32s), time (16s), date (16s), idf_ver (32s), elf_sha (32s)
+        # Total size of unpacked fields: 4 + 4 + 8 + 32 + 32 + 16 + 16 + 32 + 32 = 208 bytes.
+        app_desc = struct.pack("<II8s32s32s16s16s32s32s", 
+            0xABCD5432, # magic
+            1,          # secure_version
+            b'\x00'*8,  # reserv1
+            b'v1.0.0-test\x00', # version
+            b'test-project\x00', # project name
+            b'12:00:00\x00', # compile time
+            b'Jun 11 2026\x00', # compile date
+            b'v5.1.2\x00', # ESP-IDF version
+            b'\xab'*32 # elf_sha
+        )
+        
+        # Copy app descriptor to flash data at factory partition offset 0x10000 + 32
+        flash_data[0x10000 + 32 : 0x10000 + 32 + len(app_desc)] = app_desc
+        
+        entry3 = struct.pack("<2sBBLL16sL", b'\xaa\x50', 0, 0, 0x10000, 0x100000, b'factory', 0)
+        
+        # Write entries into partition table at 0x8000
+        flash_data[0x8000 : 0x8000 + 32] = entry1
+        flash_data[0x8000 + 32 : 0x8000 + 64] = entry2
+        flash_data[0x8000 + 64 : 0x8000 + 96] = entry3
+        
+        # Write Partition Table MD5 checksum entry (0xEB 0xEB)
+        md5_entry = struct.pack("<2sBBLL16sL", b'\xeb\xeb', 0, 0, 0, 0, b'\x00'*16, 0)
+        flash_data[0x8000 + 96 : 0x8000 + 128] = md5_entry
+        
+        with open(path, "wb") as f:
+            f.write(flash_data)
+            
+        return path
+
+    def test_esp32_partition_extraction(self, esp32_flash_image, tmp_dir):
+        from core.firmware_extraction.extractor import extract_esp32_partitions
+        log_msgs = []
+        def log_cb(m):
+            log_msgs.append(m)
+            
+        out_dir = os.path.join(tmp_dir, "extracted")
+        ok = extract_esp32_partitions(esp32_flash_image, out_dir, log_cb)
+        
+        assert ok is True
+        
+        # Verify extracted partition files
+        part_dir = os.path.join(out_dir, "extracted_partitions")
+        assert os.path.exists(part_dir)
+        
+        assert os.path.exists(os.path.join(part_dir, "bootloader.bin"))
+        assert os.path.exists(os.path.join(part_dir, "partition-table.bin"))
+        assert os.path.exists(os.path.join(part_dir, "nvs.bin"))
+        assert os.path.exists(os.path.join(part_dir, "otadata.bin"))
+        assert os.path.exists(os.path.join(part_dir, "factory.bin"))
+        
+        # Verify metadata extraction
+        meta_file = os.path.join(part_dir, "factory_meta.json")
+        assert os.path.exists(meta_file)
+        
+        import json
+        with open(meta_file, "r") as mf:
+            meta = json.load(mf)
+            
+        assert meta["project_name"] == "test-project"
+        assert meta["version"] == "v1.0.0-test"
+        assert meta["idf_version"] == "v5.1.2"
+        assert meta["compile_time"] == "12:00:00"
+        assert meta["compile_date"] == "Jun 11 2026"

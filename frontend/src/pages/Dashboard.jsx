@@ -7,7 +7,7 @@ const phases = [
   { num:1, label:'Device Detection',    path:'/devices',    icon:Cpu,           status:'active',  emba:'P02 · S06 · udevadm' },
   { num:2, label:'Firmware Extraction', path:'/firmware',   icon:HardDrive,     status:'planned', emba:'P50 · P55 · binwalk · unblob' },
   { num:3, label:'Static Analysis',     path:'/analysis',   icon:Shield,        status:'planned', emba:'S12 · S13 · S45 · S60 · checksec' },
-  { num:4, label:'SBOM / HBOM / CBOM',  path:'/sbom',       icon:Package,       status:'planned', emba:'S08 · F15 · CycloneDX' },
+  { num:4, label:'SBOM / HBOM / CBOM',  path:'/sbom',       icon:Package,       status:'active',  emba:'S08 · F15 · CycloneDX' },
   { num:5, label:'CVE Mapping',         path:'/cve',        icon:AlertTriangle, status:'planned', emba:'F50 · NVD REST v2 · EPSS' },
   { num:6, label:'VEX Risk Analysis',   path:'/vex',        icon:BarChart3,     status:'planned', emba:'KEV · VEX engine' },
   { num:7, label:'Compliance',          path:'/compliance', icon:FileCheck,     status:'planned', emba:'ETSI EN 303 645 · EU CRA' },

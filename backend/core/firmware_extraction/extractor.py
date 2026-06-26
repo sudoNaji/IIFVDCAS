@@ -288,6 +288,172 @@ def analyze_firmware_file(fw_path: str) -> FirmwareFileInfo:
     return info
 
 
+def extract_esp32_partitions(fw_path: str, output_dir: str, log_cb) -> bool:
+    import struct
+    p = Path(fw_path)
+    if not p.exists():
+        return False
+
+    file_size = p.stat().st_size
+    if file_size < 0x10000:  # Too small to be a flash dump
+        return False
+
+    # Try standard offsets for partition table
+    offsets = [0x8000, 0x9000, 0x10000]
+    partition_table_offset = None
+
+    with open(fw_path, "rb") as f:
+        for offset in offsets:
+            if file_size > offset + 32:
+                f.seek(offset)
+                entry = f.read(32)
+                if len(entry) == 32 and entry[0:2] == b'\xaa\x50':
+                    partition_table_offset = offset
+                    log_cb(f"[esp32] Found partition table at standard offset 0x{offset:x}")
+                    break
+
+    if partition_table_offset is None:
+        # Search the first 128KB of the file (aligned to 4KB sector bounds)
+        with open(fw_path, "rb") as f:
+            for offset in range(0, min(file_size, 0x20000), 0x1000):
+                f.seek(offset)
+                entry = f.read(32)
+                if len(entry) == 32 and entry[0:2] == b'\xaa\x50':
+                    partition_table_offset = offset
+                    log_cb(f"[esp32] Found partition table at sector offset 0x{offset:x}")
+                    break
+
+    if partition_table_offset is None:
+        return False
+
+    entries = []
+    with open(fw_path, "rb") as f:
+        f.seek(partition_table_offset)
+        # Maximum entries in a 3072 byte space is 95
+        for i in range(95):
+            entry_bytes = f.read(32)
+            if len(entry_bytes) < 32:
+                break
+            if entry_bytes == b'\xff' * 32:
+                break
+            if entry_bytes[0:2] == b'\xeb\xeb':
+                log_cb("[esp32] Reached MD5 checksum entry of partition table")
+                break
+            if entry_bytes[0:2] != b'\xaa\x50':
+                break
+            
+            # Format: <2sBBLL16sL (magic, type, subtype, offset, size, name, flags)
+            try:
+                magic, p_type, p_subtype, p_offset, p_size, p_name_bytes, p_flags = struct.unpack(
+                    "<2sBBLL16sL", entry_bytes
+                )
+                p_name = p_name_bytes.decode('utf-8', errors='ignore').strip('\x00')
+                entries.append({
+                    "type": p_type,
+                    "subtype": p_subtype,
+                    "offset": p_offset,
+                    "size": p_size,
+                    "name": p_name,
+                    "flags": p_flags
+                })
+            except Exception as e:
+                log_cb(f"[esp32] Error parsing partition entry {i}: {e}")
+                break
+
+    if not entries:
+        log_cb("[esp32] No valid entries parsed in partition table")
+        return False
+
+    log_cb(f"[esp32] Partition table layout parsed ({len(entries)} entries):")
+    for entry in entries:
+        log_cb(f"  - {entry['name']}: type={entry['type']}, subtype={entry['subtype']}, offset=0x{entry['offset']:x}, size=0x{entry['size']:x}")
+
+    part_dir = Path(output_dir) / "extracted_partitions"
+    part_dir.mkdir(parents=True, exist_ok=True)
+
+    extracted_count = 0
+    with open(fw_path, "rb") as f:
+        # Extract bootloader (from 0x1000 to partition table offset)
+        if partition_table_offset > 0x1000:
+            f.seek(0x1000)
+            bootloader_data = f.read(partition_table_offset - 0x1000)
+            if len(bootloader_data) > 0 and bootloader_data[0] == 0xE9:
+                bootloader_path = part_dir / "bootloader.bin"
+                bootloader_path.write_bytes(bootloader_data)
+                log_cb(f"[esp32] Extracted bootloader.bin ({len(bootloader_data)} bytes)")
+                extracted_count += 1
+
+        # Extract partition table sector itself
+        f.seek(partition_table_offset)
+        pt_data = f.read(0x1000)
+        if len(pt_data) > 0:
+            pt_path = part_dir / "partition-table.bin"
+            pt_path.write_bytes(pt_data)
+            log_cb(f"[esp32] Extracted partition-table.bin ({len(pt_data)} bytes)")
+            extracted_count += 1
+
+        # Extract partitions
+        for entry in entries:
+            name = entry["name"]
+            offset = entry["offset"]
+            size = entry["size"]
+            
+            if offset + size > file_size:
+                log_cb(f"[esp32] Warning: Partition {name} bounds out of file (offset 0x{offset:x}, size 0x{size:x})")
+                if offset < file_size:
+                    size = file_size - offset
+                else:
+                    continue
+
+            f.seek(offset)
+            part_data = f.read(size)
+            
+            part_filename = f"{name}.bin"
+            part_path = part_dir / part_filename
+            part_path.write_bytes(part_data)
+            log_cb(f"[esp32] Extracted partition {part_filename} ({len(part_data)} bytes)")
+            extracted_count += 1
+
+            # Parse app descriptor if app partition (type 0)
+            if entry["type"] == 0:
+                if len(part_data) > 32 + 256:
+                    desc_bytes = part_data[32 : 32 + 256]
+                    try:
+                        magic, secure_ver, reserv1, app_ver_b, proj_name_b, comp_time_b, comp_date_b, idf_ver_b, elf_sha_b = struct.unpack(
+                            "<II8s32s32s16s16s32s32s", desc_bytes[:176]
+                        )
+                        if magic == 0xABCD5432:
+                            proj_name = proj_name_b.decode('utf-8', errors='ignore').strip('\x00')
+                            app_ver = app_ver_b.decode('utf-8', errors='ignore').strip('\x00')
+                            comp_time = comp_time_b.decode('utf-8', errors='ignore').strip('\x00')
+                            comp_date = comp_date_b.decode('utf-8', errors='ignore').strip('\x00')
+                            idf_ver = idf_ver_b.decode('utf-8', errors='ignore').strip('\x00')
+                            elf_sha = elf_sha_b.hex()
+
+                            log_cb(f"[esp32] App Metadata for {name}:")
+                            log_cb(f"  - Project: {proj_name}")
+                            log_cb(f"  - Version: {app_ver}")
+                            log_cb(f"  - Compiled: {comp_date} {comp_time}")
+                            log_cb(f"  - ESP-IDF: {idf_ver}")
+                            log_cb(f"  - ELF SHA256: {elf_sha}")
+
+                            meta_path = part_dir / f"{name}_meta.json"
+                            with open(meta_path, "w") as mf:
+                                json.dump({
+                                    "project_name": proj_name,
+                                    "version": app_ver,
+                                    "compile_date": comp_date,
+                                    "compile_time": comp_time,
+                                    "idf_version": idf_ver,
+                                    "elf_sha256": elf_sha
+                                }, mf, indent=2)
+                            extracted_count += 1
+                    except Exception as e:
+                        log_cb(f"[esp32] Error parsing app descriptor: {e}")
+
+    return extracted_count > 0
+
+
 # ─── Phase P50/P55: Extraction engines ───────────────────────────────────────
 
 def _extract_with_binwalk(fw_path: str, output_dir: str, log_cb) -> tuple[bool, str]:
@@ -525,34 +691,64 @@ def run_extraction(
                 result.extractor_used = "unblob_fallback"
 
         else:
-            # Primary: unblob (P55 — EMBA's preferred extractor)
-            progress(20, "Extracting with unblob (primary)")
-            unblob_dir = os.path.join(output_dir, "unblob_extracted")
-            log("[P55] Trying unblob (EMBA primary extractor)")
-            unblob_ok, _ = _extract_with_unblob(fw_path, unblob_dir, log)
-
-            if unblob_ok:
+            # Check if this is an ESP32 firmware image first by scanning partition table
+            progress(20, "Checking for ESP32 partition table")
+            log("[esp32] Scanning for ESP32 partition table...")
+            esp_ok = extract_esp32_partitions(fw_path, output_dir, log)
+            
+            if esp_ok:
                 extracted = True
-                result.extractor_used = "unblob"
-                log("[P55] unblob extraction succeeded")
-                progress(50, "unblob extraction complete")
+                result.extractor_used = "esp32_partition_extractor"
+                log("[esp32] ESP32 partition extraction completed successfully")
+                
+                # Deep scan extracted partitions (if any filesystem partitions exist)
+                extracted_partitions_dir = os.path.join(output_dir, "extracted_partitions")
+                if os.path.exists(extracted_partitions_dir):
+                    for p_file in os.listdir(extracted_partitions_dir):
+                        p_path = os.path.join(extracted_partitions_dir, p_file)
+                        if os.path.isfile(p_path) and p_file.endswith(".bin"):
+                            # If partition size is > 64KB and not the bootloader/partition-table
+                            if os.path.getsize(p_path) > 65536 and p_file not in ("bootloader.bin", "partition-table.bin"):
+                                log(f"[esp32] Running unblob on partition {p_file} to search for filesystems...")
+                                p_extract_dir = os.path.join(output_dir, f"extracted_{p_file[:-4]}")
+                                p_ok, _ = _extract_with_unblob(p_path, p_extract_dir, log)
+                                if p_ok:
+                                    log(f"[esp32] Successfully extracted filesystems from partition {p_file}")
+                                else:
+                                    # try binwalk fallback
+                                    log(f"[esp32] unblob found nothing on partition {p_file} — trying binwalk fallback")
+                                    p_bw_dir = os.path.join(output_dir, f"binwalk_{p_file[:-4]}")
+                                    _extract_with_binwalk(p_path, p_bw_dir, log)
+                progress(50, "ESP32 extraction complete")
             else:
-                # Fallback: binwalk (P50 — EMBA secondary)
-                log("[P55] unblob found nothing — trying binwalk (P50 fallback)")
-                progress(35, "Fallback: extracting with binwalk")
-                binwalk_dir = os.path.join(output_dir, "binwalk_extracted")
-                bw_ok, _ = _extract_with_binwalk(fw_path, binwalk_dir, log)
+                # Primary: unblob (P55 — EMBA's preferred extractor)
+                progress(20, "Extracting with unblob (primary)")
+                unblob_dir = os.path.join(output_dir, "unblob_extracted")
+                log("[P55] Trying unblob (EMBA primary extractor)")
+                unblob_ok, _ = _extract_with_unblob(fw_path, unblob_dir, log)
 
-                if bw_ok:
+                if unblob_ok:
                     extracted = True
-                    result.extractor_used = "binwalk"
-                    log("[P50] binwalk extraction succeeded")
-                    progress(50, "binwalk extraction complete")
+                    result.extractor_used = "unblob"
+                    log("[P55] unblob extraction succeeded")
+                    progress(50, "unblob extraction complete")
                 else:
-                    log("[P60] Both unblob and binwalk found nothing — firmware may be raw binary")
-                    result.extractor_used = "none"
-                    result.status = ExtractionStatus.PARTIAL
-                    progress(50, "No extractor succeeded")
+                    # Fallback: binwalk (P50 — EMBA secondary)
+                    log("[P55] unblob found nothing — trying binwalk (P50 fallback)")
+                    progress(35, "Fallback: extracting with binwalk")
+                    binwalk_dir = os.path.join(output_dir, "binwalk_extracted")
+                    bw_ok, _ = _extract_with_binwalk(fw_path, binwalk_dir, log)
+
+                    if bw_ok:
+                        extracted = True
+                        result.extractor_used = "binwalk"
+                        log("[P50] binwalk extraction succeeded")
+                        progress(50, "binwalk extraction complete")
+                    else:
+                        log("[P60] Both unblob and binwalk found nothing — firmware may be raw binary")
+                        result.extractor_used = "none"
+                        result.status = ExtractionStatus.PARTIAL
+                        progress(50, "No extractor succeeded")
 
         # ── Step 3: Count extracted files ─────────────────────────────────
         progress(60, "Counting extracted files")
