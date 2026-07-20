@@ -201,13 +201,13 @@ async def generate_sbom(request: SBOMGenerateRequest, background_tasks: Backgrou
         try:
             from core.firmware_extraction.routes import extraction_jobs
             ex_job = extraction_jobs.get(request.extraction_job_id, {})
-            target_dir = ex_job.get("output_dir") or f"/tmp/iifvdcas_extractions/{request.extraction_job_id}"
+            target_dir = ex_job.get("output_dir") or f"/mnt/d/Uni Work/FYP 2 IOT/IIFVDCAS-main/IIFVDCAS-main/data/extractions/{request.extraction_job_id}"
         except Exception:
-            target_dir = f"/tmp/iifvdcas_extractions/{request.extraction_job_id}"
+            target_dir = f"/mnt/d/Uni Work/FYP 2 IOT/IIFVDCAS-main/IIFVDCAS-main/data/extractions/{request.extraction_job_id}"
 
     if not target_dir:
         # Default: scan the firmware store
-        target_dir = "/tmp/iifvdcas_firmware_store"
+        target_dir = "/mnt/d/Uni Work/FYP 2 IOT/IIFVDCAS-main/IIFVDCAS-main/data/firmware_store"
 
     if not Path(target_dir).exists():
         # Fallback: create an empty dir so generation can still run

@@ -25,7 +25,7 @@ from enum import Enum
 
 logger = logging.getLogger(__name__)
 
-EXTRACT_BASE = Path("/tmp/iifvdcas_extractions")
+EXTRACT_BASE = Path("/mnt/d/Uni Work/FYP 2 IOT/IIFVDCAS-main/IIFVDCAS-main/data/extractions")
 
 
 # ─── Enums matching EMBA detection logic ─────────────────────────────────────
@@ -256,6 +256,9 @@ def analyze_firmware_file(fw_path: str) -> FirmwareFileInfo:
         info.firmware_type = FirmwareType.UBOOT
     elif "CPIO ARCHIVE" in f:
         info.firmware_type = FirmwareType.CPIO
+    elif "ESP IMAGE" in bw or "ESP32" in bw or "XTENSA" in bw.upper():
+        info.firmware_type = FirmwareType.RAW_BINARY
+        info.architecture_hint = "Xtensa"
     elif any(k in f for k in ["GZIP", "ZIP", "XZ", "BZIP2", "7-ZIP", "TAR", "ISO 9660"]):
         info.firmware_type = FirmwareType.ARCHIVE
         info.is_compressed = True
@@ -636,7 +639,7 @@ def run_extraction(
         status=ExtractionStatus.RUNNING,
     )
 
-    # Output dir: /tmp/iifvdcas_extractions/<job_id>/
+    # Output dir: /mnt/d/Uni Work/FYP 2 IOT/IIFVDCAS-main/IIFVDCAS-main/data/extractions/<job_id>/
     output_dir = str(EXTRACT_BASE / job_id)
     os.makedirs(output_dir, exist_ok=True)
     result.output_dir = output_dir
@@ -745,10 +748,17 @@ def run_extraction(
                         log("[P50] binwalk extraction succeeded")
                         progress(50, "binwalk extraction complete")
                     else:
-                        log("[P60] Both unblob and binwalk found nothing — firmware may be raw binary")
-                        result.extractor_used = "none"
-                        result.status = ExtractionStatus.PARTIAL
-                        progress(50, "No extractor succeeded")
+                        log("[P60] Both unblob and binwalk found nothing — copying raw binary for string analysis")
+                        # Copy raw firmware to output dir so S108 can scan it
+                        import shutil
+                        raw_dir = os.path.join(output_dir, "raw_binary")
+                        os.makedirs(raw_dir, exist_ok=True)
+                        raw_copy = os.path.join(raw_dir, Path(fw_path).name)
+                        shutil.copy2(fw_path, raw_copy)
+                        extracted = True
+                        result.extractor_used = "raw_copy"
+                        log(f"[P60] Raw binary copied to {raw_copy} for string-based analysis")
+                        progress(50, "Raw binary ready for analysis")
 
         # ── Step 3: Count extracted files ─────────────────────────────────
         progress(60, "Counting extracted files")

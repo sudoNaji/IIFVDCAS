@@ -64,8 +64,17 @@ ARDUINO_LIB_SIGNATURES = [
      None, None,     None),
     ("ESP8266",      "esp8266",       "espressif",    "esp8266_sdk",
      None, None,     None),
+    # MicroPython (must come before ESP32 generic)
+    ("MicroPython",  "micropython",   "micropython",  "micropython",
+     None, None,     r"MicroPython[\s/v]+([\d\.]+)"),
+    ("MPY version",  "micropython",   "micropython",  "micropython",
+     None, None,     r"MPY version\s*:\s*v?([\d\.]+)"),
+
+    # ESP-IDF framework
+    ("ESP-IDF",      "esp-idf",       "espressif",    "esp-idf",
+     None, None,     r"IDF version\s*:\s*v?([\d\.]+)"),
     ("ESP32",        "esp32",         "espressif",    "esp-idf",
-     None, None,     None),
+     None, None,     r"ESP-IDF[:\s/v]+([\d\.]+)"),
 
     # ── Parsing / Serialization ───────────────────────────────────────────────
     ("ArduinoJson",  "arduinojson",   "bblanchon",    "arduinojson",
@@ -225,6 +234,18 @@ def detect_avr_components(
     # Firmware identity
     fw_name = "custom-avr-firmware"
     fw_ver  = "unknown"
+    # MicroPython specific version extraction
+    for s in all_strings:
+        m = re.search(r'MicroPython[\s/v]+([\d\.]+)', s, re.IGNORECASE)
+        if m:
+            fw_name = "micropython"
+            fw_ver = m.group(1)
+            break
+        m2 = re.search(r'MPY version\s*:\s*v?([\d\.]+)', s)
+        if m2:
+            fw_name = "micropython"
+            fw_ver = m2.group(1)
+            break
     for s in all_strings:
         m = re.search(r'([A-Za-z][A-Za-z0-9\-]{3,20})[-_]IoT|([A-Za-z][A-Za-z0-9\-]{3,20})-Firmware', s)
         if m:

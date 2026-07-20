@@ -2,7 +2,7 @@
 """
 Build a SQLite index of the local NVD per-CVE JSON feed.
 Run once: python3 build_nvd_index.py
-Output:  /tmp/iifvdcas_nvd.db  (~50–80 MB)
+Output:  /mnt/d/Uni Work/FYP 2 IOT/IIFVDCAS-main/IIFVDCAS-main/data/nvd.db  (~50–80 MB)
 
 Schema:
   cve(id, published, cvss_score, cvss_severity, cvss_vector, description, cwe_ids, path)
@@ -16,7 +16,7 @@ from datetime import datetime
 
 NVD_ROOT  = Path.home() / "emba" / "external" / "nvd-json-data-feeds"
 EPSS_DIR  = Path.home() / "emba" / "external" / "EPSS-data" / "EPSS_CVE_data"
-DB_PATH   = Path("/tmp/iifvdcas_nvd.db")
+DB_PATH   = Path("/mnt/d/Uni Work/FYP 2 IOT/IIFVDCAS-main/IIFVDCAS-main/data/nvd.db")
 STATE_CSV = NVD_ROOT / "_state.csv"
 
 def get_cve_path(cve_id: str) -> Path:

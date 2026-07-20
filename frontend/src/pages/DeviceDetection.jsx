@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Cpu, Scan, Usb, RefreshCw, ChevronRight, Terminal,
   CheckCircle2, AlertCircle, Network, Info, Wifi,
@@ -136,7 +137,7 @@ function DeviceDetail({ device, onClose, onExtract }) {
           <HardDrive size={12} /> Extract Firmware
         </button>
         <button
-          onClick={() => window.location.href = '/analysis'}
+          onClick={() => navigate('/analysis')}
           className="btn-secondary text-xs flex-1 justify-center"
         >
           <Shield size={12} /> Analyse
@@ -242,11 +243,12 @@ export default function DeviceDetection() {
     }
   }, [includeNetwork])
 
+  const navigate = useNavigate()
   const handleExtract = useCallback((device) => {
     // Navigate to firmware extraction page with device pre-selected
     sessionStorage.setItem('extract_device_port', device.port)
     sessionStorage.setItem('extract_device_name', device.device_class)
-    window.location.href = '/firmware'
+    navigate("/firmware", { state: { device } })
   }, [])
 
   const usbDevices = devices.filter(d => d.connection_type === 'usb')

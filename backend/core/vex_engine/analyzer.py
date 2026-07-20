@@ -98,7 +98,7 @@ def _load_sbom_data(sbom_job_id: str) -> Dict:
         logger.debug(f"[VEX] memory SBOM load: {e}")
 
     # Disk fallback
-    base = Path(f"/tmp/iifvdcas_sbom/{sbom_job_id}")
+    base = Path(f"/mnt/d/Uni Work/FYP 2 IOT/IIFVDCAS-main/IIFVDCAS-main/data/sbom/{sbom_job_id}")
     result = {}
     for name, key in [
         ("cyclonedx_sbom.json", "sbom"),
@@ -287,9 +287,16 @@ def run_vex_analysis(
     device_info_dict = device_info or {}
 
     if not cve_findings:
-        result.status = "failed"
-        result.error  = f"No CVE findings found for job {cve_job_id}. Run Phase 5 first."
-        emit(100, f"Failed: {result.error}")
+        result.status = "no_findings"
+        result.risk_label = "UNKNOWN"
+        result.error = (
+            "Phase 5 found no CVE matches. This is not evidence that the "
+            "firmware has no vulnerabilities; identifiable component versions "
+            "are required for VEX triage."
+        )
+        result.completed_at = datetime.now(timezone.utc).isoformat()
+        log(f"[VEX] {result.error}")
+        emit(100, "No CVE findings to triage - assessment is inconclusive")
         return result
 
     log(f"[VEX] {len(cve_findings)} CVE findings loaded")
@@ -369,7 +376,7 @@ def run_vex_analysis(
     emit(92, "Generating CycloneDX VEX document…")
 
     # ── CycloneDX VEX document ─────────────────────────────────────────────────
-    output_dir = Path(f"/tmp/iifvdcas_vex/{job_id}")
+    output_dir = Path(f"/mnt/d/Uni Work/FYP 2 IOT/IIFVDCAS-main/IIFVDCAS-main/data/vex/{job_id}")
     output_dir.mkdir(parents=True, exist_ok=True)
     vex_path   = str(output_dir / "vex_document.json")
 

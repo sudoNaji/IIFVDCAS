@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 # KEV data locations
 KEV_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
-KEV_CACHE_PATH = Path("/tmp/iifvdcas_kev_cache.json")
+KEV_CACHE_PATH = Path("/mnt/d/Uni Work/FYP 2 IOT/IIFVDCAS-main/IIFVDCAS-main/data/kev_cache.json")
 KEV_CACHE_TTL = 86400  # 24 hours in seconds
 
 # In-memory cache for KEV IDs

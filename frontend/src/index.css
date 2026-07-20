@@ -1,17 +1,36 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-@layer base { * { box-sizing:border-box; } body { font-family:'Inter',system-ui,sans-serif; } }
+
+@layer base {
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+    background-color: #000000;
+    color: #ffffff;
+  }
+}
+
 @layer components {
-  .card { @apply bg-gray-900 border border-gray-800 rounded-xl p-5; }
-  .btn-primary { @apply bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-4 py-2 rounded-lg transition-colors flex items-center gap-2; }
-  .btn-secondary { @apply bg-gray-800 hover:bg-gray-700 text-gray-200 font-medium px-4 py-2 rounded-lg transition-colors flex items-center gap-2 border border-gray-700; }
+  .card {
+    background-color: #191c24;
+    border: 1px solid #2c2e33;
+    border-radius: 0.5rem;
+    padding: 1.25rem;
+  }
+  .btn-primary {
+    @apply bg-green-600 hover:bg-green-700 text-white font-medium px-4 py-2 rounded-lg transition-colors flex items-center gap-2;
+  }
+  .btn-secondary {
+    background-color: #2c2e33;
+    @apply hover:bg-gray-700 text-gray-200 font-medium px-4 py-2 rounded-lg transition-colors flex items-center gap-2 border border-gray-700;
+  }
   .badge { @apply text-xs font-medium px-2 py-0.5 rounded-full; }
-  .badge-green  { @apply bg-green-950 text-green-400 border border-green-800; }
-  .badge-red    { @apply bg-red-950 text-red-400 border border-red-800; }
-  .badge-amber  { @apply bg-amber-950 text-amber-400 border border-amber-800; }
-  .badge-blue   { @apply bg-blue-950 text-blue-400 border border-blue-800; }
-  .badge-purple { @apply bg-purple-950 text-purple-400 border border-purple-800; }
-  .badge-gray   { @apply bg-gray-800 text-gray-400 border border-gray-700; }
-  .mono { font-family:'JetBrains Mono',monospace; }
+  .badge-green  { background-color: #00c154; @apply text-white; }
+  .badge-red    { background-color: #e83d44; @apply text-white; }
+  .badge-amber  { background-color: #eb9d00; @apply text-white; }
+  .badge-blue   { background-color: #0084d5; @apply text-white; }
+  .badge-purple { background-color: #8457d5; @apply text-white; }
+  .badge-gray   { background-color: #2c2e33; @apply text-gray-400; }
+  .mono { font-family: 'JetBrains Mono', monospace; }
 }

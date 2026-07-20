@@ -941,6 +941,16 @@ def run_s108_embedded_string_analysis(
             if fp.suffix.lower() in FW_EXTENSIONS or fp.suffix == "":
                 candidate_files.append(fp)
 
+    # Also explicitly add extracted_partitions and raw_binary directory files
+    from pathlib import Path as _Path
+    for subdir in ["extracted_partitions", "raw_binary"]:
+        scan_dir = _Path(target_dir) / subdir
+        if scan_dir.exists():
+            for pf in scan_dir.iterdir():
+                if pf.is_file() and pf.stat().st_size > 64 and pf not in candidate_files:
+                    candidate_files.append(pf)
+                    log_cb(f"[S108] Added {subdir} file: {pf.name} ({pf.stat().st_size // 1024}KB)")
+
     log_cb(f"[S108] Scanning {len(candidate_files)} binary/firmware files for embedded strings")
 
     for fp in candidate_files:

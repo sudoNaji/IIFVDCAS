@@ -17,7 +17,7 @@ from .gap_checker import check_all_controls, compliance_score, ControlResult
 
 logger = logging.getLogger(__name__)
 
-OUTPUT_BASE = Path("/tmp/iifvdcas_compliance")
+OUTPUT_BASE = Path("/mnt/d/Uni Work/FYP 2 IOT/IIFVDCAS-main/IIFVDCAS-main/data/compliance")
 
 
 @dataclass
@@ -98,7 +98,7 @@ def _load_sbom(sbom_job_id: str) -> Dict:
     except Exception:
         pass
     # Disk fallback
-    base = Path(f"/tmp/iifvdcas_sbom/{sbom_job_id}")
+    base = Path(f"/mnt/d/Uni Work/FYP 2 IOT/IIFVDCAS-main/IIFVDCAS-main/data/sbom/{sbom_job_id}")
     result = {}
     for fname, key in [("cyclonedx_sbom.json","sbom"),
                        ("hbom.json","hbom"), ("cbom.json","cbom")]:

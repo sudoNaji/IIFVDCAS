@@ -16,7 +16,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-DB_PATH     = Path("/tmp/iifvdcas_nvd.db")
+DB_PATH     = Path("/mnt/d/Uni Work/FYP 2 IOT/IIFVDCAS-main/IIFVDCAS-main/data/nvd.db")
 NVD_API_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 OSV_BATCH   = "https://api.osv.dev/v1/querybatch"
 
