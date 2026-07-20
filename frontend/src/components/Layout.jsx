@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Outlet, NavLink } from 'react-router-dom'
-import { Cpu, LayoutDashboard, HardDrive, Shield, Package, AlertTriangle, BarChart3, FileCheck, Wifi, Sparkles, Settings } from 'lucide-react'
+import { Cpu, LayoutDashboard, HardDrive, Shield, Package, AlertTriangle, BarChart3, FileCheck, Wifi, Sparkles, Settings, Menu, X } from 'lucide-react'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useAI } from '../hooks/useAI'
 import AIChat from './AIChat'
@@ -18,82 +18,174 @@ const nav = [
 
 export default function Layout() {
   const { connected } = useWebSocket('ws://localhost:8000/ws')
+  const [completedPhases, setCompletedPhases] = useState(new Set())
+
+  useEffect(() => {
+    const checkPhases = async () => {
+      const done = new Set()
+      try {
+        const fw = await fetch('/api/v1/firmware/jobs').then(r => r.json())
+        if (fw.jobs?.some(j => j.status === 'completed' || j.status === 'success')) done.add(2)
+      } catch (_) {}
+      try {
+        const an = await fetch('/api/v1/analysis/jobs').then(r => r.json())
+        if (an.jobs?.some(j => j.status === 'success')) done.add(3)
+      } catch (_) {}
+      try {
+        const sb = await fetch('/api/v1/sbom/jobs/list').then(r => r.json())
+        if (sb.jobs?.some(j => j.status === 'success')) done.add(4)
+      } catch (_) {}
+      try {
+        const cv = await fetch('/api/v1/cve/jobs/list').then(r => r.json())
+        if (cv.jobs?.some(j => j.status === 'completed')) done.add(5)
+      } catch (_) {}
+      try {
+        const vx = await fetch('/api/v1/vex/jobs/list').then(r => r.json())
+        const DONE = ['completed','success','done','complete']
+        if (vx.jobs?.some(j => DONE.includes(j.status))) done.add(6)
+      } catch (_) {}
+      try {
+        const cp = await fetch('/api/v1/compliance/jobs/list').then(r => r.json())
+        const DONE2 = ['completed','success','done','complete']
+        if (cp.jobs?.some(j => DONE2.includes(j.status))) done.add(7)
+      } catch (_) {}
+      setCompletedPhases(done)
+    }
+    checkPhases()
+    const interval = setInterval(checkPhases, 5000)
+    return () => clearInterval(interval)
+  }, [])
   const { isConfigured } = useAI()
   const [chatOpen, setChatOpen] = useState(false)
+  const [collapsed, setCollapsed] = useState(false)
 
   return (
-    <div className="flex h-screen bg-gray-950 overflow-hidden relative">
-      <aside className="w-64 flex-shrink-0 bg-gray-900 border-r border-gray-800 flex flex-col">
-        <div className="p-5 border-b border-gray-800">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
-              <Shield size={16} className="text-white" />
+    <div className="flex h-screen overflow-hidden relative" style={{backgroundColor:'#000000'}}>
+
+      {/* Sidebar */}
+      <aside
+        className="flex-shrink-0 flex flex-col transition-all duration-300"
+        style={{
+          width: collapsed ? '60px' : '240px',
+          backgroundColor: '#000000',
+          borderRight: '1px solid #2c2e33',
+        }}
+      >
+        {/* Logo + Toggle */}
+        <div
+          className="flex items-center px-3 py-4 flex-shrink-0"
+          style={{
+            borderBottom: '1px solid #2c2e33',
+            justifyContent: collapsed ? 'center' : 'space-between',
+          }}
+        >
+          {!collapsed && (
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{backgroundColor:'#0084d5'}}>
+                <Shield size={14} className="text-white" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-sm font-bold text-white tracking-wide">IIFVDCAS</div>
+                <div className="text-[10px] truncate" style={{color:'#6c757d'}}>Firmware Security</div>
+              </div>
             </div>
-            <div>
-              <div className="text-sm font-semibold text-white">IIFVDCAS</div>
-              <div className="text-xs text-gray-500">Firmware Security Platform</div>
-            </div>
-          </div>
+          )}
+          <button
+            onClick={() => setCollapsed(!collapsed)}
+            className="flex-shrink-0 p-1.5 rounded-lg transition-colors hover:bg-gray-800"
+            style={{color:'#6c757d'}}
+          >
+            {collapsed ? <Menu size={16} /> : <X size={16} />}
+          </button>
         </div>
-        
-        <nav className="flex-1 p-3 overflow-y-auto">
-          <div className="text-xs text-gray-600 font-medium uppercase tracking-wider px-2 mb-2">Analysis Pipeline</div>
+
+        {/* Nav */}
+        <nav className="flex-1 px-2 py-3 overflow-y-auto overflow-x-hidden">
+          {!collapsed && (
+            <div className="text-[10px] font-semibold uppercase tracking-widest px-2 mb-2" style={{color:'#6c757d'}}>
+              Navigation
+            </div>
+          )}
           {nav.map(item => (
-            <NavLink key={item.path} to={item.path} className={({isActive}) =>
-              `flex items-center gap-3 px-3 py-2.5 rounded-lg mb-0.5 text-sm transition-colors ${isActive ? 'bg-indigo-600/20 text-indigo-400 border border-indigo-600/30' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'}`
-            }>
+            <NavLink
+              key={item.path}
+              to={item.path}
+              title={collapsed ? item.label : undefined}
+              className="flex items-center mb-0.5 rounded-lg transition-all duration-150 text-sm font-medium"
+              style={({isActive}) => ({
+                gap: collapsed ? '0' : '10px',
+                padding: collapsed ? '10px 0' : '9px 10px',
+                justifyContent: collapsed ? 'center' : 'flex-start',
+                backgroundColor: isActive ? 'rgba(255,255,255,0.06)' : 'transparent',
+                color: isActive ? '#ffffff' : '#8a8d98',
+                borderLeft: isActive ? '3px solid #00c154' : '3px solid transparent',
+              })}
+            >
               <item.icon size={16} className="flex-shrink-0" />
-              <span className="flex-1 font-medium">{item.label}</span>
-              {item.phase && (
-                <span className={`badge text-[10px] ${item.status==='active' ? 'badge-green' : 'badge-gray'}`}>P{item.phase}</span>
+              {!collapsed && <span className="flex-1 truncate">{item.label}</span>}
+              {!collapsed && item.phase && (
+                <span className={`badge text-[10px] flex-shrink-0 ${item.status === 'active' || completedPhases.has(item.phase) ? 'badge-green' : 'badge-gray'}`}>
+                  P{item.phase}
+                </span>
               )}
             </NavLink>
           ))}
         </nav>
 
-        {/* Sidebar Footer: AI Assistant + Connection Info */}
-        <div className="p-3 border-t border-gray-800 space-y-2">
-          {/* AI Chat button */}
+        {/* Footer */}
+        <div className="px-2 pb-3 pt-2 space-y-1 flex-shrink-0" style={{borderTop:'1px solid #2c2e33'}}>
           <button
             onClick={() => setChatOpen(!chatOpen)}
-            className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-semibold transition-all border ${
-              chatOpen 
-                ? 'bg-indigo-600 text-white border-indigo-500 shadow-lg shadow-indigo-600/20' 
-                : 'text-indigo-400 bg-indigo-950/20 border-indigo-800/20 hover:bg-indigo-950/40'
-            }`}
+            title={collapsed ? 'AI Assistant Chat' : undefined}
+            className="w-full flex items-center rounded-lg text-xs font-semibold transition-all"
+            style={{
+              gap: collapsed ? '0' : '10px',
+              padding: collapsed ? '9px 0' : '8px 10px',
+              justifyContent: collapsed ? 'center' : 'flex-start',
+              backgroundColor: chatOpen ? '#0084d5' : 'rgba(0,132,213,0.08)',
+              color: chatOpen ? '#ffffff' : '#0084d5',
+              border: '1px solid rgba(0,132,213,0.25)',
+            }}
           >
-            <Sparkles size={13} className={isConfigured ? 'animate-pulse' : ''} />
-            <span className="flex-1 text-left">AI Assistant Chat</span>
-            <span className={`w-2 h-2 rounded-full ${isConfigured ? 'bg-green-400 shadow-sm shadow-green-400' : 'bg-amber-400'}`} title={isConfigured ? 'AI Settings configured' : 'AI configuration missing'} />
+            <Sparkles size={14} className={isConfigured ? 'animate-pulse' : ''} />
+            {!collapsed && <span className="flex-1 text-left">AI Assistant</span>}
+            {!collapsed && (
+              <span className="w-2 h-2 rounded-full flex-shrink-0" style={{backgroundColor: isConfigured ? '#00c154' : '#eb9d00'}} />
+            )}
           </button>
 
-          {/* AI settings link */}
-          <NavLink 
+          <NavLink
             to="/ai-settings"
-            className={({isActive}) =>
-              `flex items-center gap-3 px-3 py-2 rounded-lg text-xs transition-colors ${
-                isActive 
-                  ? 'bg-gray-800 text-white font-medium border border-gray-700' 
-                  : 'text-gray-400 hover:text-gray-200 hover:bg-gray-850'
-              }`
-            }
+            title={collapsed ? 'AI Provider Settings' : undefined}
+            className="flex items-center rounded-lg text-xs transition-colors"
+            style={({isActive}) => ({
+              gap: collapsed ? '0' : '10px',
+              padding: collapsed ? '9px 0' : '8px 10px',
+              justifyContent: collapsed ? 'center' : 'flex-start',
+              backgroundColor: isActive ? 'rgba(255,255,255,0.06)' : 'transparent',
+              color: isActive ? '#ffffff' : '#8a8d98',
+            })}
           >
-            <Settings size={13} />
-            <span>AI Provider Settings</span>
+            <Settings size={14} />
+            {!collapsed && <span>AI Provider Settings</span>}
           </NavLink>
 
-          <div className="flex items-center gap-2 text-xs pt-1 px-3">
-            <Wifi size={11} className={connected ? 'text-green-400' : 'text-gray-600'} />
-            <span className={connected ? 'text-green-400' : 'text-gray-600'}>{connected ? 'Live connected' : 'Connecting...'}</span>
-          </div>
+          {!collapsed && (
+            <div className="flex items-center gap-2 text-xs px-2 pt-1">
+              <Wifi size={11} style={{color: connected ? '#00c154' : '#6c757d'}} />
+              <span style={{color: connected ? '#00c154' : '#6c757d'}}>
+                {connected ? 'Live connected' : 'Connecting...'}
+              </span>
+            </div>
+          )}
         </div>
       </aside>
-      
-      <main className="flex-1 overflow-y-auto relative">
+
+      {/* Main */}
+      <main className="flex-1 overflow-y-auto min-w-0" style={{backgroundColor:'#000000'}}>
         <Outlet />
       </main>
 
-      {/* Floating AI Chat Side panel */}
       <AIChat isOpen={chatOpen} onClose={() => setChatOpen(false)} />
     </div>
   )

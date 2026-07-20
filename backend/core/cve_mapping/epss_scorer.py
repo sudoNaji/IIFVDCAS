@@ -9,7 +9,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-DB_PATH  = Path("/tmp/iifvdcas_nvd.db")
+DB_PATH  = Path("/mnt/d/Uni Work/FYP 2 IOT/IIFVDCAS-main/IIFVDCAS-main/data/nvd.db")
 EPSS_DIR = Path.home() / "emba" / "external" / "EPSS-data" / "EPSS_CVE_data"
 
 _csv_cache: Dict[str, float] = {}

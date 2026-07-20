@@ -15,6 +15,7 @@ import queue
 import re
 import shutil
 import subprocess
+import sys
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,8 +31,8 @@ from core.firmware_extraction.extractor import (
 
 router = APIRouter(prefix="/api/v1/firmware", tags=["firmware"])
 
-UPLOAD_DIR    = Path("/tmp/iifvdcas_uploads");    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-FIRMWARE_STORE = Path("/tmp/iifvdcas_firmware_store"); FIRMWARE_STORE.mkdir(parents=True, exist_ok=True)
+UPLOAD_DIR    = Path("/mnt/d/Uni Work/FYP 2 IOT/IIFVDCAS-main/IIFVDCAS-main/data/uploads");    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+FIRMWARE_STORE = Path("/mnt/d/Uni Work/FYP 2 IOT/IIFVDCAS-main/IIFVDCAS-main/data/firmware_store"); FIRMWARE_STORE.mkdir(parents=True, exist_ok=True)
 
 extraction_jobs: dict[str, dict] = {}
 
@@ -199,26 +200,29 @@ def _esptool_read_cmd(
     no_stub:     bool = False,
 ) -> list[str]:
     """
-    Build the correct esptool read_flash command.
+    Build the correct esptool v5 read-flash command.
 
     Key fixes vs previous version:
-      - 'read_flash' (underscore), NOT 'read-flash' or 'read-flash'
+      - 'read-flash' (hyphen), as required by esptool v5
       - Flash size is an explicit hex integer, NOT the string "ALL"
-      - --before default_reset (underscore), --after hard_reset (underscore)
+      - --before default-reset, --after hard-reset
       - --no-stub flag added when no_stub=True
     """
     size_arg = hex(flash_bytes) if flash_bytes else "0x400000"  # default 4 MB
+    # Use the API process's interpreter so virtual-environment PATH handling
+    # cannot make the installed esptool command disappear.
     cmd = [
-        "esptool",
+        sys.executable,
+        "-m", "esptool",
         "--port",   device_port,
         "--baud",   str(baud),
         "--chip",   chip,
-        "--before", "default_reset",
-        "--after",  "hard_reset",
+        "--before", "default-reset",
+        "--after",  "hard-reset",
     ]
     if no_stub:
         cmd.append("--no-stub")
-    cmd += ["read_flash", "0x0", size_arg, out_path]
+    cmd += ["read-flash", "0x0", size_arg, out_path]
     return cmd
 
 
@@ -247,7 +251,7 @@ async def _run_device_extraction_bg(
     await emit("extraction_started")
     await emit("progress", percent=2, step="Preparing directories")
 
-    output_dir = Path("/tmp/iifvdcas_extractions") / job_id
+    output_dir = Path("/mnt/d/Uni Work/FYP 2 IOT/IIFVDCAS-main/IIFVDCAS-main/data/extractions") / job_id
     output_dir.mkdir(parents=True, exist_ok=True)
     ts          = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     chip_label  = chip if tool == "esptool" else mcu
@@ -346,6 +350,7 @@ async def _run_device_extraction_bg(
         attempt_error = ""
         corrupt_data  = False
         detected_size = None
+        last_read_pct = -1
 
         while True:
             try:
@@ -367,9 +372,12 @@ async def _run_device_extraction_bg(
                     continue
 
                 # Parse progress percentage
-                m_pct = re.search(r"\(\s*(\d+)\s*%\)", value)
+                m_pct = re.search(r"(\d+(?:\.\d+)?)%", value)
                 if m_pct:
-                    pct = int(m_pct.group(1))
+                    pct = int(float(m_pct.group(1)))
+                    if pct == last_read_pct:
+                        continue
+                    last_read_pct = pct
                     stub_label = "(--no-stub)" if is_no_stub else ""
                     await emit("progress",
                                percent=5 + int(pct * 0.15),
@@ -552,6 +560,17 @@ async def get_file_tree(job_id: str):
             "flash_bin_filename": job.get("flash_bin_filename"),
             "flash_bin_size_human": job.get("flash_bin_size_human")}
 
+
+@router.get("/extract/{job_id}/download")
+async def download_firmware(job_id: str):
+    if job_id not in extraction_jobs:
+        raise HTTPException(404, "Job not found")
+    job = extraction_jobs[job_id]
+    path = job.get("flash_bin_path")
+    filename = job.get("flash_bin_filename", "flash.bin")
+    if not path or not Path(path).exists():
+        raise HTTPException(404, "Firmware file not found")
+    return FileResponse(path, media_type="application/octet-stream", filename=filename)
 
 @router.delete("/extract/{job_id}")
 async def delete_extraction(job_id: str):

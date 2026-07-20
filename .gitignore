@@ -87,3 +87,13 @@ routes.py.bak
 backend/__pycache__/
 *.pyc
 unblob.log
+data/
+backend/venv/
+backend/__pycache__/
+backend/core/**/__pycache__/
+*.pyc
+*.pyo
+frontend/node_modules/
+
+# Reference dashboard template source
+corona-free-dark-bootstrap-admin-template-1.0.0/

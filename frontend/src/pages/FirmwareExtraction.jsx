@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
   HardDrive, Upload, Cpu, Scan, CheckCircle2, AlertCircle,
   FolderOpen, File, ChevronRight, ChevronDown, Terminal,
@@ -331,18 +332,32 @@ function AvrdudeSettings({ mcu, setMcu, baudrate, setBaudrate, includeEeprom, se
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function FirmwareExtraction() {
+  const navigate = useNavigate()
+  const location = useLocation()
   const [devices, setDevices]             = useState([])
   const [selectedDevice, setSelectedDevice] = useState(null)
+  useEffect(() => {
+    if (location.state?.device) {
+      setSelectedDevice(location.state.device)
+      setActiveTab('device')
+    }
+  }, [location.state])
   const [uploadedFile,   setUploadedFile] = useState(null)
   const [analyzing,      setAnalyzing]    = useState(false)
   const [extracting,     setExtracting]   = useState(false)
   const [firmwareInfo,   setFirmwareInfo] = useState(null)
   const [jobId,          setJobId]        = useState(null)
-  const [extractionResult, setExtractionResult] = useState(null)
+  const [extractionResult, setExtractionResult] = useState(() => {
+    const s = sessionStorage.getItem('fw_extraction_result')
+    return s ? JSON.parse(s) : null
+  })
   const [logs,           setLogs]         = useState([])
   const [progress,       setProgress]     = useState(0)
   const [progressStep,   setProgressStep] = useState('')
-  const [fileTree,       setFileTree]     = useState([])
+  const [fileTree, setFileTree] = useState(() => {
+    const s = sessionStorage.getItem('fw_file_tree')
+    return s ? JSON.parse(s) : []
+  })
   const [activeTab,      setActiveTab]    = useState('upload')
   const [dragOver,       setDragOver]     = useState(false)
   const fileInputRef = useRef(null)
@@ -406,7 +421,11 @@ export default function FirmwareExtraction() {
         const result = event.result || {}
         setExtractionResult(result)
         if (result.firmware_info) setFirmwareInfo(result.firmware_info)
-        if (result.file_tree) setFileTree(result.file_tree)
+        if (result.file_tree) {
+          setFileTree(result.file_tree)
+          sessionStorage.setItem('fw_file_tree', JSON.stringify(result.file_tree))
+        }
+        sessionStorage.setItem('fw_extraction_result', JSON.stringify(result))
         setLogs(prev => [...prev, {
           ts: new Date().toISOString(),
           msg: `[DONE] ${event.status} — ${event.total_files ?? 0} files extracted`,
@@ -454,6 +473,7 @@ export default function FirmwareExtraction() {
       try {
         const r = await firmwareApi.extract(path)
         setJobId(r.data.job_id)
+        sessionStorage.setItem('fw_extraction_job_id', r.data.job_id)
       } catch (err) {
         setExtracting(false)
         alert('Extraction failed: ' + (err.response?.data?.detail || err.message))
@@ -480,6 +500,8 @@ export default function FirmwareExtraction() {
       try {
         const r = await firmwareApi.extractDevice(opts)
         setJobId(r.data.job_id)
+        sessionStorage.setItem('fw_extraction_job_id', r.data.job_id)
+        sessionStorage.setItem('fw_extraction_job_id', r.data.job_id)
       } catch (err) {
         setExtracting(false)
         alert('Extraction failed: ' + (err.response?.data?.detail || err.message))
@@ -489,7 +511,7 @@ export default function FirmwareExtraction() {
 
   const handleReset = () => {
     setUploadedFile(null); setSelectedDevice(null); setFirmwareInfo(null)
-    setExtractionResult(null); setLogs([]); setFileTree([])
+    setExtractionResult(null); setLogs([]); setFileTree([]); sessionStorage.removeItem('fw_extraction_job_id'); sessionStorage.removeItem('fw_extraction_result'); sessionStorage.removeItem('fw_file_tree')
     setProgress(0); setJobId(null); setExtracting(false); setAnalyzing(false)
   }
 
@@ -661,22 +683,36 @@ export default function FirmwareExtraction() {
           {/* Action buttons */}
           {hasSource && (
             <div className="flex gap-2">
-              <button
-                onClick={handleAnalyze}
-                disabled={analyzing || extracting}
-                className="btn-secondary text-sm flex-1"
-              >
-                <Search size={14} className={analyzing ? 'animate-spin' : ''}/>
-                {analyzing ? 'Analyzing...' : 'Analyze (P02)'}
-              </button>
-              <button
-                onClick={handleExtract}
-                disabled={extracting || analyzing}
-                className="btn-primary text-sm flex-1"
-              >
-                <Zap size={14} className={extracting ? 'animate-pulse' : ''}/>
-                {extracting ? 'Extracting...' : 'Extract Firmware'}
-              </button>
+              {activeTab === 'upload' && (
+                <button
+                  onClick={async () => { if (!jobId) { await handleExtract() } navigate('/analysis') }}
+                  disabled={analyzing || extracting}
+                  className="btn-secondary text-sm flex-1"
+                >
+                  <Search size={14}/>
+                  {extracting ? 'Extracting...' : jobId ? 'Run Static Analysis →' : 'Extract & Analyze →'}
+                </button>
+              )}
+              {activeTab === 'device' && (
+                <>
+                  <button
+                    onClick={() => { if (jobId) navigate('/analysis') }}
+                    disabled={!jobId || extracting}
+                    className="btn-secondary text-sm flex-1"
+                  >
+                    <Search size={14}/>
+                    {jobId ? 'Run Static Analysis →' : 'Extract First'}
+                  </button>
+                  <button
+                    onClick={handleExtract}
+                    disabled={extracting || analyzing}
+                    className="btn-primary text-sm flex-1"
+                  >
+                    <Zap size={14} className={extracting ? 'animate-pulse' : ''}/>
+                    {extracting ? 'Extracting...' : 'Extract Firmware'}
+                  </button>
+                </>
+              )}
             </div>
           )}
 
@@ -693,7 +729,17 @@ export default function FirmwareExtraction() {
               <div className="flex items-center gap-2 mb-3">
                 <FolderOpen size={14} className="text-amber-400"/>
                 <span className="text-sm font-semibold text-white">Extracted File Tree</span>
-                <span className="badge badge-green text-[10px] ml-auto">
+                <button
+                  onClick={() => {
+                    const a = document.createElement("a");
+                    a.href = `/api/v1/firmware/extract/${extractionResult?.job_id}/download`;
+                    a.download = extractionResult?.flash_bin_filename || "flash.bin";
+                    a.click();
+                  }}
+                  className="ml-auto flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-white"
+                  style={{backgroundColor:"#0084d5"}}
+                >Download</button>
+                <span className="badge badge-green text-[10px]">
                   {extractionResult?.total_files?.toLocaleString()} files
                 </span>
               </div>

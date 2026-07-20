@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useLocation } from 'react-router-dom'
 import {
   Shield, Play, RefreshCw, CheckCircle2, AlertCircle, AlertTriangle,
   Lock, Key, FileText, Terminal, ChevronDown, ChevronRight,
@@ -285,12 +286,24 @@ export default function StaticAnalysis() {
   const [jobId, setJobId] = useState(null)
   const [error, setError] = useState('')
   const [extractionJobs, setExtractionJobs] = useState([])
+
+
   const { subscribe } = useWebSocket('ws://localhost:8000/ws')
 
-  // Fetch extraction jobs for the dropdown
+  // Fetch extraction jobs and auto-select saved job
   useEffect(() => {
     api.get('/firmware/jobs')
-      .then(r => setExtractionJobs(r.data.jobs || []))
+      .then(r => {
+        const jobs = r.data.jobs || []
+        setExtractionJobs(jobs)
+        const savedJobId = sessionStorage.getItem('fw_extraction_job_id')
+        if (savedJobId && jobs.find(j => j.job_id === savedJobId)) {
+          setExtractionJobId(savedJobId)
+        } else if (savedJobId) {
+          // job not in list yet, set anyway
+          setExtractionJobId(savedJobId)
+        }
+      })
       .catch(() => {})
   }, [])
 
@@ -333,7 +346,20 @@ export default function StaticAnalysis() {
 
     try {
       const r = await api.post('/analysis/start', body)
-      setJobId(r.data.job_id)
+      const analysisJobId = r.data.job_id
+      setJobId(analysisJobId)
+      const poll = setInterval(async () => {
+        try {
+          const res = await api.get('/analysis/' + analysisJobId)
+          if (res.data.status === 'success' || res.data.status === 'failed') {
+            clearInterval(poll)
+            setRunning(false)
+            setProgress(100)
+            setResult(res.data)
+            setLogs(prev => [...prev, { ts: new Date().toISOString(), msg: '[DONE] ' + res.data.status + ' — Risk: ' + res.data.risk_score + '/100 (' + res.data.risk_label + ')' }])
+          }
+        } catch (_) {}
+      }, 1000)
     } catch (err) {
       setRunning(false)
       setError(err.response?.data?.detail || err.message)

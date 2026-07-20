@@ -521,7 +521,7 @@ export default function VEXPage() {
         const r = await vexApi.getStatus(vexJobId)
         const { status, progress: pct } = r.data
         setProgress(p => Math.max(p, pct ?? 0))
-        if (status === 'success' || status === 'failed') {
+        if (status === 'success' || status === 'failed' || status === 'no_findings') {
           clearInterval(pollRef.current)
           setRunning(false)
           if (status === 'failed') setError(r.data.error || 'VEX analysis failed')
@@ -622,9 +622,11 @@ export default function VEXPage() {
         </div>
         {isDone && (
           <div className="flex gap-2">
-            <button onClick={handleDownload} className="btn-secondary text-sm">
-              <Download size={14} /> CycloneDX VEX
-            </button>
+            {result.status === 'success' && (
+              <button onClick={handleDownload} className="btn-secondary text-sm">
+                <Download size={14} /> CycloneDX VEX
+              </button>
+            )}
             <button onClick={handleReset} className="btn-secondary text-sm">
               <RefreshCw size={14} /> Reset
             </button>
@@ -719,6 +721,11 @@ export default function VEXPage() {
       {/* Results */}
       {isDone && (
         <>
+          {result.status === 'no_findings' && (
+            <div className="mb-4 border border-amber-800 bg-amber-950/30 px-4 py-3 text-sm text-amber-200">
+              No CVEs were available for VEX triage. This result is inconclusive, not a confirmation that the firmware is vulnerability-free. Generate an ESP-specific SBOM with identifiable component versions, then run Phase 5 again.
+            </div>
+          )}
           {/* Risk gauge + stat cards */}
           <div className="grid grid-cols-5 gap-4 mb-6">
             <div className="card flex items-center justify-center col-span-1">

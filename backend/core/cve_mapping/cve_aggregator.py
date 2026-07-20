@@ -109,7 +109,7 @@ def _load_components(sbom_job_id: str) -> List[Dict]:
     except Exception as e:
         logger.debug(f"[CVE] memory lookup: {e}")
 
-    base = Path(f"/tmp/iifvdcas_sbom/{sbom_job_id}")
+    base = Path(f"/mnt/d/Uni Work/FYP 2 IOT/IIFVDCAS-main/IIFVDCAS-main/data/sbom/{sbom_job_id}")
     for name in ("cyclonedx_sbom.json", "sbom.json", "components.json", "bom.json"):
         fp = base / name
         if not fp.exists():
@@ -152,7 +152,7 @@ def _is_real_package(comp: Dict) -> bool:
     """Return True only if this component should be looked up in NVD."""
     name   = (comp.get("name")        or "").lower().strip()
     source = (comp.get("source_path") or "").lower()
-    vendor = (comp.get("vendor")      or "").strip()
+    vendor = (comp.get("vendor") or comp.get("supplier") or "").strip()
     cpe    = (comp.get("cpe")         or "").strip()
 
     if name in _SECURITY_MARKERS:
@@ -168,7 +168,7 @@ def _is_real_package(comp: Dict) -> bool:
 
 def _should_do_product_lookup(comp: Dict) -> bool:
     """Return True if a name-based NVD product lookup is appropriate."""
-    vendor = (comp.get("vendor")      or "").strip()
+    vendor = (comp.get("vendor") or comp.get("supplier") or "").strip()
     source = (comp.get("source_path") or "").lower()
     if source in _FIRMWARE_ID_SOURCES:
         return False
@@ -202,7 +202,7 @@ def _map_all(
         name    = (comp.get("name")    or "").strip()
         version = (comp.get("version") or "").strip()
         cpe     = (comp.get("cpe")     or "").strip()
-        vendor  = (comp.get("vendor")  or "").strip()
+        vendor  = (comp.get("vendor") or comp.get("supplier") or "").strip()
 
         pct = 10 + int(i / max(total, 1) * 55)
         emit(pct, f"[{i+1}/{total}] {name}")

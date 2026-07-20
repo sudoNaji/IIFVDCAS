@@ -217,14 +217,20 @@ def run_f02_toolchain(target_dir: str, log_cb) -> dict:
     bin_files = list(Path(target_dir).rglob("*.bin"))
     for bf in bin_files[:3]:
         str_out, _, _ = _run(["strings", "-n", "4", str(bf)], timeout=10)
-        if "avr-gcc" in str_out.lower() or "avr" in str_out.lower():
+        strings_lower = str_out.lower()
+        if any(marker in strings_lower for marker in ("esp-idf", "esp32", "esp8266", "xtensa")):
+            toolchain["architecture"] = "Xtensa (ESP32/ESP8266)"
+            toolchain["compiler_hint"] = "ESP-IDF"
+            toolchain["libc_type"] = "newlib"
+            break
+        if "avr-gcc" in strings_lower or "avr-libc" in strings_lower:
             toolchain["architecture"] = "AVR (ATmega)"
             toolchain["compiler_hint"] = "avr-gcc"
             toolchain["libc_type"] = "avr-libc"
             break
     # If still unknown and .bin/.hex files present → AVR
     if toolchain["architecture"] == "unknown":
-        if any(Path(target_dir).rglob("*.bin")) or any(Path(target_dir).rglob("*.hex")):
+        if any(Path(target_dir).rglob("*.hex")):
             toolchain["architecture"] = "AVR (ATmega)"
             toolchain["libc_type"] = "avr-libc"
     log_cb(f"[F02] Arch: {toolchain['architecture']} | libc: {toolchain['libc_type']} | compiler: {toolchain['compiler_hint']}")
@@ -525,7 +531,7 @@ def run_sbom_generation(
         status="running",
     )
     prior = prior_analysis or {}
-    output_dir = Path(f"/tmp/iifvdcas_sbom/{job_id}")
+    output_dir = Path(f"/mnt/d/Uni Work/FYP 2 IOT/IIFVDCAS-main/IIFVDCAS-main/data/sbom/{job_id}")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if not os.path.isdir(target_dir):
@@ -546,13 +552,31 @@ def run_sbom_generation(
         cfg_comps = _detect_config_components(target_dir, log)
         all_comps = elf_comps + cfg_comps
 
+        if result.toolchain.get("architecture", "").startswith("Xtensa"):
+            esp_strings = ""
+            for bf in list(Path(target_dir).rglob("*.bin"))[:3]:
+                out, _, _ = _run(["strings", "-n", "4", str(bf)], timeout=15)
+                esp_strings += out + "\n"
+            match = re.search(r"(?:ESP-IDF[^\n]{0,80}|[A-Za-z0-9_-]*idf)[^\n]*?v?(\d+\.\d+\.\d+)", esp_strings, re.I)
+            if not match:
+                match = re.search(r"(?:idf|esp|qa-test)[A-Za-z0-9_-]*-v(\d+\.\d+\.\d+)", esp_strings, re.I)
+            if match:
+                version = match.group(1)
+                all_comps.append(SBOMComponent(
+                    bom_ref=str(uuid.uuid4()), component_type="framework",
+                    name="esp-idf", version=version, supplier="espressif",
+                    license="Apache-2.0", source_path="esp-idf-version-scan",
+                    cpe=f"cpe:2.3:a:espressif:esp-idf:{version}:*:*:*:*:*:*:*",
+                    purl=f"pkg:generic/espressif/esp-idf@{version}",
+                ))
+                log(f"[ESP-SBOM] ESP-IDF {version} detected from firmware strings")
+            else:
+                log("[ESP-SBOM] ESP-IDF detected but no reliable version string was found")
+
         # ── AVR/MCU: Embedded library detection ──────────────────────────
         # For raw AVR firmware (no ELF/package managers), scan binary
         # strings for known Arduino/embedded library signatures with CPEs.
-        is_avr = (
-            result.toolchain.get("architecture", "").upper().startswith("AVR")
-            or not elf_comps
-        )
+        is_avr = result.toolchain.get("architecture", "").upper().startswith("AVR")
         if is_avr:
             progress(38, "AVR: Detecting embedded library components")
             try:
