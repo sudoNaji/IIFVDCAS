@@ -15,6 +15,19 @@
 **A full-stack firmware security assessment platform for IoT devices.**  
 Automated 7-phase pipeline: device detection → firmware extraction → static analysis → SBOM/HBOM/CBOM → CVE mapping → VEX risk triage → compliance report (PDF).
 
+<p align="center">
+  <strong>Supervisor</strong><br>
+  Dr. Tahir Mushtaq
+</p>
+
+<p align="center">
+  <strong>Collaborators</strong><br>
+  Imran Hashmi &nbsp;•&nbsp;
+  Muhammad Moeed &nbsp;•&nbsp;
+  Muhammad Hassan &nbsp;•&nbsp;
+  Zain-Ul-Abedin
+</p>
+
 [Features](#-features) · [Architecture](#-architecture) · [Quick Start](#-quick-start) · [Pipeline](#-7-phase-pipeline) · [Hardware](#-hardware-support) · [Status](#-project-status)
 
 </div>
