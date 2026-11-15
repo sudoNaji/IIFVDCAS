@@ -25,7 +25,7 @@ Automated 7-phase pipeline: device detection → firmware extraction → static 
   Imran Hashmi &nbsp;•&nbsp;
   Muhammad Moeed &nbsp;•&nbsp;
   Muhammad Hassan &nbsp;•&nbsp;
-  Zain-Ul-Abedin
+  Muhammad Zain-Ul-Abedin
 </p>
 
 [Features](#-features) · [Architecture](#-architecture) · [Quick Start](#-quick-start) · [Pipeline](#-7-phase-pipeline) · [Hardware](#-hardware-support) · [Status](#-project-status)
